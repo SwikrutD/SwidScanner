@@ -60,6 +60,8 @@ object Routes {
     const val QR = "qr"
     const val SETTINGS = "settings"
     fun camera(docId: String? = null) = if (docId == null) "camera" else "camera?docId=$docId"
+    /** Camera that replaces [pageId]'s photo, then reopens its crop screen with [thenDoc]. */
+    fun retake(docId: String, pageId: String, thenDoc: Boolean) = "camera?docId=$docId&retake=$pageId&thenDoc=$thenDoc"
     fun crop(docId: String, pageId: String, thenDoc: Boolean = false) = "crop/$docId/$pageId?thenDoc=$thenDoc"
     fun doc(docId: String) = "doc/$docId"
     fun page(docId: String, pageId: String) = "page/$docId/$pageId"

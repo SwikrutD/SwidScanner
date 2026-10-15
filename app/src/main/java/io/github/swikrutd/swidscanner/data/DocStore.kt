@@ -121,6 +121,35 @@ object DocStore {
         }
     }
 
+    /**
+     * Replaces a page's photo with a new one (a retake), keeping its place in the document
+     * and its filter. [image] is already upright, so any earlier rotation is dropped.
+     */
+    suspend fun replaceImage(docId: String, pageId: String, image: Bitmap, corners: List<Corner>?): Page =
+        withContext(Dispatchers.IO) {
+            render.withLock {
+                val old = get(docId)?.pages?.firstOrNull { it.id == pageId } ?: error("Page was deleted")
+                val np = old.copy(corners = corners, rotation = 0, rev = old.rev + 1)
+                _busy.update { it + pageId }
+                try {
+                    Images.saveJpeg(image, origFile(docId, pageId), 92)
+                    renderFiles(docId, np, image)
+                } finally {
+                    _busy.update { it - pageId }
+                }
+                meta.withLock {
+                    val d = get(docId) ?: error("Document was deleted")
+                    val nd = d.copy(
+                        pages = d.pages.map { if (it.id == pageId) np else it },
+                        updated = System.currentTimeMillis(),
+                    )
+                    write(nd); publish(nd)
+                }
+                procFile(docId, old).delete(); thumbFile(docId, old).delete()
+                np
+            }
+        }
+
     suspend fun setFilterForAll(docId: String, filter: Filter) {
         get(docId)?.pages?.filter { it.filter != filter }?.forEach { p ->
             updatePage(docId, p.id) { it.copy(filter = filter) }

@@ -38,6 +38,6 @@ private val Dark = darkColorScheme(
 )
 
 @Composable
-fun SwidTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) Dark else Light, content = content)
+fun SwidTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme = if (dark) Dark else Light, content = content)
 }

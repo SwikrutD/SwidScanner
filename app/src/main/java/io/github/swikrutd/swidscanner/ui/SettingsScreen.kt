@@ -38,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +57,7 @@ import io.github.swikrutd.swidscanner.core.Filter
 import io.github.swikrutd.swidscanner.data.PageSize
 import io.github.swikrutd.swidscanner.data.Quality
 import io.github.swikrutd.swidscanner.data.Settings
+import io.github.swikrutd.swidscanner.data.ThemeMode
 import io.github.swikrutd.swidscanner.export.Delivery
 import io.github.swikrutd.swidscanner.export.Drive
 import io.github.swikrutd.swidscanner.export.rememberDriveAuthorizer
@@ -80,6 +82,7 @@ fun SettingsScreen(nav: NavController) {
     var pageSize by remember { mutableStateOf(Settings.pageSize) }
     var quality by remember { mutableStateOf(Settings.quality) }
     var searchable by remember { mutableStateOf(Settings.searchablePdf) }
+    val theme by Settings.theme.collectAsState()
 
     val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
@@ -189,6 +192,11 @@ fun SettingsScreen(nav: NavController) {
             Text("Quality", style = MaterialTheme.typography.labelLarge)
             Segmented(Quality.entries, quality, { it.label }) { quality = it; Settings.quality = it }
             SwitchRow("Searchable PDF", "Add an invisible OCR text layer to PDFs", searchable) { searchable = it; Settings.searchablePdf = it }
+
+            HorizontalDivider()
+            Section("Appearance")
+            Text("Theme", style = MaterialTheme.typography.labelLarge)
+            Segmented(ThemeMode.entries, theme, { it.label }) { Settings.setTheme(it) }
 
             HorizontalDivider()
             Section("About")

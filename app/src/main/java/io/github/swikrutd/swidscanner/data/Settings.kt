@@ -4,8 +4,13 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
 import io.github.swikrutd.swidscanner.core.Filter
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 enum class PageSize(val label: String) { FIT("Fit image"), A4("A4"), LETTER("Letter") }
+
+enum class ThemeMode(val label: String) { SYSTEM("System"), LIGHT("Light"), DARK("Dark") }
 
 enum class Quality(val label: String, val maxSide: Int, val jpeg: Int) {
     HIGH("High", 2600, 90),
@@ -18,6 +23,17 @@ object Settings {
 
     fun init(ctx: Context) {
         p = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        _theme.value = enumOr(p.getString("theme", null), ThemeMode.SYSTEM)
+    }
+
+    private val _theme = MutableStateFlow(ThemeMode.SYSTEM)
+
+    /** Light, dark or follow the system. A flow so the whole app recolours as soon as it changes. */
+    val theme: StateFlow<ThemeMode> = _theme.asStateFlow()
+
+    fun setTheme(v: ThemeMode) {
+        p.edit { putString("theme", v.name) }
+        _theme.value = v
     }
 
     var defaultFilter: Filter

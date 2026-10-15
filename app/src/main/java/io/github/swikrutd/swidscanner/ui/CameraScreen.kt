@@ -124,8 +124,8 @@ private val DebugCyan = Color(0xFF3FD0FF)
 private const val TAG = "SwidCam"
 
 @Composable
-fun CameraScreen(nav: NavController, existingDocId: String?) {
-    RequireCamera(nav) { CameraContent(nav, existingDocId) }
+fun CameraScreen(nav: NavController, existingDocId: String?, retakePageId: String? = null, retakeThenDoc: Boolean = false) {
+    RequireCamera(nav) { CameraContent(nav, existingDocId, retakePageId, retakeThenDoc) }
 }
 
 /** Shows [content] once camera permission is granted, asking for it first. */
@@ -164,14 +164,18 @@ private class AutoState {
 /** One analysed frame: the steadied quad to show and the raw detection, normalised to the upright frame, plus what the debug overlay needs. */
 private class FrameResult(val quad: List<Offset>?, val raw: List<Offset>?, val w: Float, val h: Float, val source: OutputTransform?)
 
+/**
+ * With [retakePageId] set, the next shot replaces that page's photo and the crop screen
+ * opens again; batch mode and gallery import are off.
+ */
 @Composable
-private fun CameraContent(nav: NavController, existingDocId: String?) {
+private fun CameraContent(nav: NavController, existingDocId: String?, retakePageId: String?, retakeThenDoc: Boolean) {
     val ctx = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
 
     var auto by remember { mutableStateOf(Settings.autoCapture) }
-    var batch by remember { mutableStateOf(Settings.batchMode) }
+    var batch by remember { mutableStateOf(Settings.batchMode && retakePageId == null) }
     var torch by remember { mutableStateOf(false) }
     var docId by remember { mutableStateOf(existingDocId) }
     var captured by remember { mutableIntStateOf(0) }
@@ -257,6 +261,12 @@ private fun CameraContent(nav: NavController, existingDocId: String?) {
     }
 
     fun finish() {
+        if (retakePageId != null && existingDocId != null) {
+            // Retake cancelled: back to the page as it was.
+            nav.popBackStack()
+            nav.navigate(Routes.crop(existingDocId, retakePageId, thenDoc = retakeThenDoc))
+            return
+        }
         scope.launch {
             while (pending > 0) delay(100)
             val id = docId
@@ -284,7 +294,8 @@ private fun CameraContent(nav: NavController, existingDocId: String?) {
                             val bmp = Images.rotate(Images.scaleDown(raw, Images.CAPTURE_MAX), rotation)
                             val corners = Images.detectCorners(bmp) ?: liveQuad?.map { Corner(it.x, it.y) }
                             val id = ensureDoc()
-                            val page = DocStore.addPage(id, bmp, corners, Settings.defaultFilter)
+                            val page = if (retakePageId != null) DocStore.replaceImage(id, retakePageId, bmp, corners)
+                            else DocStore.addPage(id, bmp, corners, Settings.defaultFilter)
                             bmp.recycle()
                             val t = Images.decodeFile(DocStore.thumbFile(id, page), 240).asImageBitmap()
                             Triple(id, page.id, t)
@@ -293,7 +304,8 @@ private fun CameraContent(nav: NavController, existingDocId: String?) {
                         captured++
                         if (!batch) {
                             nav.popBackStack()
-                            nav.navigate(Routes.crop(id, pageId, thenDoc = existingDocId == null))
+                            val thenDoc = if (retakePageId != null) retakeThenDoc else existingDocId == null
+                            nav.navigate(Routes.crop(id, pageId, thenDoc = thenDoc))
                         }
                     } catch (e: Exception) {
                         message = "Couldn't save the page: ${e.message}"
@@ -437,16 +449,22 @@ private fun CameraContent(nav: NavController, existingDocId: String?) {
 
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.Center) {
                 ModeToggle("Auto", "Manual", auto) { auto = it; Settings.autoCapture = it }
-                Spacer(Modifier.width(12.dp))
-                ModeToggle("Batch", "Single", batch) { batch = it; Settings.batchMode = it }
+                if (retakePageId == null) {
+                    Spacer(Modifier.width(12.dp))
+                    ModeToggle("Batch", "Single", batch) { batch = it; Settings.batchMode = it }
+                }
             }
 
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 20.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
-                    Icon(Icons.Outlined.PhotoLibrary, "Import from gallery", tint = Color.White, modifier = Modifier.size(30.dp))
+                if (retakePageId == null) {
+                    IconButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                        Icon(Icons.Outlined.PhotoLibrary, "Import from gallery", tint = Color.White, modifier = Modifier.size(30.dp))
+                    }
+                } else {
+                    Spacer(Modifier.size(48.dp))
                 }
                 Shutter(progress = progress, busy = capturing || (!batch && pending > 0)) { if (batch || pending == 0) capture() }
                 Box(Modifier.size(60.dp), contentAlignment = Alignment.Center) {
