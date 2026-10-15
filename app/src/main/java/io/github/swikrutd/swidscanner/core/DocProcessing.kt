@@ -47,6 +47,11 @@ object DocProcessing {
     /** Degrees an edge's gradient may differ from a side's normal and still support it. */
     private const val ANGLE_TOL = 20
     private const val LINES_PER_AXIS = 8
+    private const val MAX_SEGMENTS = 200
+    /** Most of the strip [grow] adds may be darker than paper (a coloured band is fine, a table is not). */
+    private const val MAX_GROW_DARK = 0.3
+    /** Share of edge pixels in a 15 px window above which edges count as texture, not borders. */
+    private const val MAX_EDGE_DENSITY = 0.2
     /** How far either side of an outline to compare the two regions, and the mean difference needed. */
     private val STEP_PX = doubleArrayOf(4.0, 10.0)
     private const val MIN_STEP = 12
@@ -249,11 +254,22 @@ object DocProcessing {
         val edgeMat = edgeMap.toMat()
         debugSupport?.invoke(edgeMat)
         // Lines find pages whose outline never forms a clean contour.
-        val lineQuads = quadsFromLines(edgeMat, imgArea)
+        val lineQuads = quadsFromLines(houghLines(edgeMat, sparseOnly = true), edgeMat.cols(), edgeMat.rows(), imgArea)
         edgeMat.release()
         val w = gray.cols(); val h = gray.rows()
         var best: List<Point>? = null
         var bestScore = 0.0
+        val accepted = ArrayList<Pair<List<Point>, Double>>()
+
+        fun score(q: List<Point>, needsStep: Boolean): Double? {
+            val s = edgeSupport(edgeMap, q) ?: return null
+            debugCandidate?.invoke(q, s.sides, s.borderSides)
+            if (s.borderSides > 0 || s.sides.min() < MIN_SIDE_SUPPORT || s.sides.average() < MIN_SUPPORT) return null
+            if (needsStep && !stepsEverywhere(planes, w, h, q)) return null
+            val cx = q.sumOf { it.x } / 4 - w / 2.0; val cy = q.sumOf { it.y } / 4 - h / 2.0
+            val offCentre = hypot(cx, cy) / hypot(w / 2.0, h / 2.0)
+            return (polyArea(q) / imgArea) * s.sides.average() * (1.0 - 0.3 * offCentre) * (1.0 - darkShare(gray, q))
+        }
         // Contour quads need snapping onto the edges; quads built from lines already sit on them.
         // Several passes often find the same outline; refine each one once.
         val unique = ArrayList<Pair<List<Point>, Boolean>>()
@@ -263,17 +279,23 @@ object DocProcessing {
         val all = unique.asSequence().mapNotNull { (c, step) -> refine(edgeMap, c)?.let { it to step } } +
             lineQuads.asSequence().map { it to true }
         for ((q, needsStep) in all) {
-            val s = edgeSupport(edgeMap, q) ?: continue
-            debugCandidate?.invoke(q, s.sides, s.borderSides)
-            if (s.borderSides > 0 || s.sides.min() < MIN_SIDE_SUPPORT || s.sides.average() < MIN_SUPPORT) continue
-            if (needsStep && !stepsEverywhere(planes, w, h, q)) continue
-            val cx = q.sumOf { it.x } / 4 - w / 2.0; val cy = q.sumOf { it.y } / 4 - h / 2.0
-            val offCentre = hypot(cx, cy) / hypot(w / 2.0, h / 2.0)
-            val upper = (polyArea(q) / imgArea) * s.sides.average() * (1.0 - 0.3 * offCentre)
-            // The paper check is the slow part, so skip it when the quad can't win anyway.
-            if (upper <= bestScore) continue
-            val score = upper * (1.0 - darkShare(gray, q))
-            if (score > bestScore) { bestScore = score; best = q }
+            val sc = score(q, needsStep) ?: continue
+            accepted += q to sc
+            if (sc > bestScore) { bestScore = sc; best = q }
+        }
+        // A page split by a coloured band, a table rule or a header bar is often found as just
+        // one part. Try pushing each side of the best few out to a parallel line further out;
+        // if the bigger quad passes every check it wins on area.
+        for ((q, _) in accepted.sortedByDescending { it.second }.take(3)) {
+            for ((grown, strip) in grow(q, edgeMap)) {
+                // Can't win even with perfect edges: not worth snapping.
+                if (polyArea(grown) / imgArea <= bestScore) continue
+                // The added strip must be more of the same paper, not the surface it lies on.
+                if (darkShare(gray, strip) > MAX_GROW_DARK) continue
+                val r = refine(edgeMap, grown) ?: continue
+                val sc = score(r, needsStep = true) ?: continue
+                if (sc > bestScore) { bestScore = sc; best = r }
+            }
         }
 
         gray.release(); kernel.release()
@@ -600,30 +622,60 @@ object DocProcessing {
      * clean contour, such as a book page joined to the facing page or a page touching a
      * same-coloured object.
      */
-    private fun quadsFromLines(edges: Mat, imgArea: Double): List<List<Point>> {
+    private fun segLen(l: DoubleArray) = hypot(l[2] - l[0], l[3] - l[1])
+    private fun segAngle(l: DoubleArray) = Math.toDegrees(atan2(l[3] - l[1], l[2] - l[0])).let { if (it < 0) it + 180 else it }
+    private fun segLine(l: DoubleArray) = Pair(Point(l[0], l[1]), Point(l[2], l[3]))
+
+    /**
+     * Straight edge segments (x1, y1, x2, y2), merged so each line appears once, longest first.
+     * [sparseOnly] first drops edges in densely edged areas (fabric, carpet, text), which
+     * otherwise make plenty of long chance alignments and crowd out the page's own borders,
+     * but also lose a border running right beside such an area.
+     */
+    private fun houghLines(edges: Mat, sparseOnly: Boolean): List<DoubleArray> {
         val w = edges.cols(); val h = edges.rows()
+        val input = if (sparseOnly) {
+            val sparse = Mat(); val dense = Mat()
+            Imgproc.blur(edges, dense, Size(15.0, 15.0))
+            Imgproc.threshold(dense, dense, 255 * MAX_EDGE_DENSITY, 255.0, Imgproc.THRESH_BINARY_INV)
+            Core.bitwise_and(edges, dense, sparse)
+            dense.release()
+            sparse
+        } else edges
         val segs = Mat()
-        Imgproc.HoughLinesP(edges, segs, 1.0, Math.PI / 180, 40, 0.12 * min(w, h), 6.0)
+        Imgproc.HoughLinesP(input, segs, 1.0, Math.PI / 180, 40, 0.12 * min(w, h), 6.0)
+        if (sparseOnly) input.release()
         val lines = ArrayList<DoubleArray>()
         for (i in 0 until segs.rows()) lines += segs.get(i, 0)
         segs.release()
-        // Merge near-duplicates (same direction, close together), keeping the longer one.
-        fun len(l: DoubleArray) = hypot(l[2] - l[0], l[3] - l[1])
-        fun angle(l: DoubleArray) = Math.toDegrees(atan2(l[3] - l[1], l[2] - l[0])).let { if (it < 0) it + 180 else it }
+        // Merge segments on the same line (same direction, close together) into the longest one,
+        // adding up their lengths: a page border with uneven contrast, such as a book's spine,
+        // comes out of Hough as several short pieces.
+        val len = ::segLen; val angle = ::segAngle
         val kept = ArrayList<DoubleArray>()
-        for (l in lines.sortedByDescending { len(it) }) {
+        val total = ArrayList<Double>()
+        // Short pieces of texture add nothing but cost; the merge is quadratic.
+        for (l in lines.sortedByDescending { len(it) }.take(MAX_SEGMENTS)) {
             val a = angle(l)
             val mx = (l[0] + l[2]) / 2; val my = (l[1] + l[3]) / 2
-            val dup = kept.any { k ->
+            val same = kept.indexOfFirst { k ->
                 val d = abs(angle(k) - a).let { min(it, 180 - it) }
                 val nx = -(k[3] - k[1]) / len(k); val ny = (k[2] - k[0]) / len(k)
                 d < 6 && abs((mx - k[0]) * nx + (my - k[1]) * ny) < 8
             }
-            if (!dup) kept += l
+            if (same < 0) { kept += l; total += len(l) } else total[same] += len(l)
         }
-        val horiz = kept.filter { angle(it).let { a -> a < 45 || a > 135 } }.take(LINES_PER_AXIS)
-        val vert = kept.filter { angle(it).let { a -> a in 45.0..135.0 } }.take(LINES_PER_AXIS)
-        fun line(l: DoubleArray) = Pair(Point(l[0], l[1]), Point(l[2], l[3]))
+        return kept.indices.sortedByDescending { total[it] }.map { kept[it] }
+    }
+
+    /**
+     * Quads made from straight edge segments: the longest roughly horizontal and roughly
+     * vertical lines are paired up and intersected.
+     */
+    private fun quadsFromLines(ranked: List<DoubleArray>, w: Int, h: Int, imgArea: Double): List<List<Point>> {
+        val horiz = ranked.filter { segAngle(it).let { a -> a < 45 || a > 135 } }.take(LINES_PER_AXIS)
+        val vert = ranked.filter { segAngle(it).let { a -> a in 45.0..135.0 } }.take(LINES_PER_AXIS)
+        val line = ::segLine
         val out = ArrayList<List<Point>>()
         val slack = 0.05 * max(w, h)
         for (i in horiz.indices) for (j in i + 1 until horiz.size) {
@@ -642,6 +694,42 @@ object DocProcessing {
                 if (!isConvex(p)) continue
                 out += p
             }
+        }
+        return out
+    }
+
+    /**
+     * Variants of [q] with one side slid outwards, parallel to itself, onto another edge
+     * (corners re-intersected with the neighbouring sides), each with the strip it adds.
+     * The caller snaps them, which also corrects a small difference in angle.
+     */
+    private fun grow(q: List<Point>, edges: EdgeMap): List<Pair<List<Point>, List<Point>>> {
+        val cx = q.sumOf { it.x } / 4; val cy = q.sumOf { it.y } / 4
+        val out = ArrayList<Pair<List<Point>, List<Point>>>()
+        for (i in 0 until 4) {
+            val a = q[i]; val b = q[(i + 1) % 4]
+            val len = dist(a, b)
+            if (len < 1) continue
+            var nx = -(b.y - a.y) / len; var ny = (b.x - a.x) / len
+            if ((a.x - cx) * nx + (a.y - cy) * ny < 0) { nx = -nx; ny = -ny }
+            val prev = Pair(q[(i + 3) % 4], a); val next = Pair(b, q[(i + 2) % 4])
+            val peaks = ArrayList<Pair<List<Point>, Double>>()
+            var before = 0.0; var last: List<Point>? = null; var lastS = 0.0
+            var off = 8
+            while (true) {
+                val sa = Point(a.x + nx * off, a.y + ny * off); val sb = Point(b.x + nx * off, b.y + ny * off)
+                val na = intersect(prev, Pair(sa, sb)) ?: break
+                val nb = intersect(Pair(sa, sb), next) ?: break
+                if (!edges.inside(na.x.roundToInt(), na.y.roundToInt()) || !edges.inside(nb.x.roundToInt(), nb.y.roundToInt())) break
+                val sup = edges.along(na, nb)
+                // Keep each local peak of support that is high enough to be a border.
+                if (last != null && lastS >= MIN_SIDE_SUPPORT && lastS >= before && lastS > sup) peaks += last to lastS
+                before = lastS
+                lastS = sup
+                last = q.toMutableList().also { it[i] = na; it[(i + 1) % 4] = nb }.takeIf { isConvex(it) }
+                off += 2
+            }
+            peaks.sortedByDescending { it.second }.take(2).forEach { (g, _) -> out += g to listOf(a, b, g[(i + 1) % 4], g[i]) }
         }
         return out
     }
