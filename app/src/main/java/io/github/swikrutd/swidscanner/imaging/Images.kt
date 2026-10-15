@@ -116,6 +116,19 @@ object Images {
         return q?.map { Corner((it.x / w).toFloat().coerceIn(0f, 1f), (it.y / h).toFloat().coerceIn(0f, 1f)) }
     }
 
+    /** Book mode: the left and right page of an open book in [b], as corners normalised to [b]. */
+    fun splitBook(b: Bitmap): Pair<List<Corner>, List<Corner>> {
+        val small = Bitmap.createScaledBitmap(b, (b.width * scaleFor(b)).roundToInt().coerceAtLeast(1),
+            (b.height * scaleFor(b)).roundToInt().coerceAtLeast(1), true)
+        val m = toMat(small)
+        val split = DocProcessing.splitBook(m)
+        val w = m.cols().toFloat(); val h = m.rows().toFloat()
+        m.release()
+        if (small !== b) small.recycle()
+        fun norm(q: List<Point>) = q.map { Corner((it.x / w).toFloat().coerceIn(0f, 1f), (it.y / h).toFloat().coerceIn(0f, 1f)) }
+        return norm(split.left) to norm(split.right)
+    }
+
     private fun scaleFor(b: Bitmap) = minOf(1f, 1000f / max(b.width, b.height))
 
     /** Crop, rotate and filter a capture into the final page image. */

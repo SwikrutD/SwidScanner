@@ -7,6 +7,9 @@ An open-source document scanner for Android. No account, no ads and no cloud pro
 - **Live page detection.** The camera outlines the document as you aim.
 - **Auto-capture or manual.** In Auto mode the shot is taken once the page has been steady for about a second. The shutter button always works too.
 - **Single or batch.** Single takes you straight to corner adjustment after each shot. Batch keeps scanning page after page (it re-arms when you move or turn the page) and you review everything at the end.
+- **Book mode.** Tap the book icon in the camera, line the spine up with the guide and each photo becomes two pages, left and right.
+- **Named from text.** New documents are named after the heading on their first page (switch off in Settings).
+- **Quick scan.** Long-press the app icon and tap Scan, or add the Scan tile to the quick settings panel, to go straight to the camera.
 - **Gallery import.** Turn existing photos into scanned pages, with the same automatic crop.
 - **Corner adjustment** with draggable handles and a magnifier, plus Auto (re-detect), Full (no crop) and Retake (replace the photo, keeping the page in place).
 - **Five filters:** Original, Magic (flattens shadows and whitens paper), Enhance, Grayscale and B&W. Set a default and apply one to every page.

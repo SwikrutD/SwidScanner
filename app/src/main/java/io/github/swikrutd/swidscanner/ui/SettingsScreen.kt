@@ -84,6 +84,7 @@ fun SettingsScreen(nav: NavController) {
     var saveFolder by remember { mutableStateOf(Settings.saveToFolder) }
     var saveDrive by remember { mutableStateOf(Settings.saveToDrive) }
     var autoSave by remember { mutableStateOf(Settings.autoSave) }
+    var autoName by remember { mutableStateOf(Settings.autoName) }
     val pickFolder = rememberFolderPicker { folderName = Settings.folderName; saveFolder = true }
 
     Scaffold(
@@ -107,6 +108,11 @@ fun SettingsScreen(nav: NavController) {
             }
             SwitchRow("Auto-capture", "Takes the photo once the page is steady for a second", auto) { auto = it; Settings.autoCapture = it }
             SwitchRow("Batch mode", "Keep scanning page after page, review at the end", batch) { batch = it; Settings.batchMode = it }
+            SwitchRow(
+                "Name from text",
+                "Names a new document after the largest text on its first page, such as a heading. Off: Scan and the date",
+                autoName,
+            ) { autoName = it; Settings.autoName = it }
 
             HorizontalDivider()
             Section("Save locations")

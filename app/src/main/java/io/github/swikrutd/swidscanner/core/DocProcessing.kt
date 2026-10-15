@@ -741,6 +741,86 @@ object DocProcessing {
         if (n == 5) (0 until 5).map { setOf(it) }
         else (0 until 6).flatMap { i -> (i + 1 until 6).map { j -> setOf(i, j) } }
 
+    /**
+     * Book mode: splits a photo of an open book into its left and right pages. Returns each
+     * page's corners (TL, TR, BR, BL in [src] pixels) and the spine as a line from the top to
+     * the bottom edge of the image. Each half falls back to the area beside the spine when no
+     * page outline is found in it.
+     */
+    fun splitBook(src: Mat): BookSplit {
+        val scale = min(1.0, DETECT_SIZE / max(src.cols(), src.rows()))
+        val small = Mat()
+        Imgproc.resize(src, small, Size(), scale, scale, Imgproc.INTER_AREA)
+        val gray = toGray(small)
+        small.release()
+        val w = gray.cols(); val h = gray.rows()
+        // The spine may lean a little: find it separately in the upper and lower half.
+        val top = spineColumn(gray, 0.15, 0.5)
+        val bottom = spineColumn(gray, 0.5, 0.85)
+        val (xt, xb) = if (abs(top - bottom) > 0.08 * w) {
+            val mid = spineColumn(gray, 0.15, 0.85); mid to mid
+        } else {
+            // Extend the line through the two halves' centres (y = 0.325h and 0.675h) to the edges.
+            val k = (bottom - top) / (0.35 * h)
+            (top - k * 0.325 * h) to (bottom + k * 0.325 * h)
+        }
+        gray.release()
+        val inv = 1.0 / scale
+        val spineTop = Point(xt * inv, 0.0)
+        val spineBottom = Point(xb * inv, h * inv)
+        val W = src.cols().toDouble(); val H = src.rows().toDouble()
+        val leftArea = listOf(Point(0.0, 0.0), spineTop, spineBottom, Point(0.0, H))
+        val rightArea = listOf(spineTop, Point(W, 0.0), Point(W, H), spineBottom)
+        return BookSplit(pageIn(src, leftArea) ?: leftArea, pageIn(src, rightArea) ?: rightArea, spineTop, spineBottom)
+    }
+
+    class BookSplit(val left: List<Point>, val right: List<Point>, val spineTop: Point, val spineBottom: Point)
+
+    /**
+     * Column of the spine between rows [from] and [to] (fractions of the height), searched in
+     * the middle half of the width. The spine is a strong vertical structure there: either the
+     * gutter's shadow (two edges) or the step between a text page and a photo. Text gives
+     * vertical edges too, but spread evenly, not stacked in one column.
+     */
+    private fun spineColumn(gray: Mat, from: Double, to: Double): Double {
+        val w = gray.cols(); val h = gray.rows()
+        val band = gray.submat((from * h).toInt(), (to * h).toInt(), 0, w)
+        val blur = Mat(); val gx = Mat(); val col = Mat()
+        Imgproc.GaussianBlur(band, blur, Size(5.0, 5.0), 0.0)
+        Imgproc.Sobel(blur, gx, CvType.CV_32F, 1, 0)
+        Core.absdiff(gx, org.opencv.core.Scalar(0.0), gx)
+        Core.reduce(gx, col, 0, Core.REDUCE_SUM, CvType.CV_32F)
+        val profile = FloatArray(w).also { col.get(0, 0, it) }
+        band.release(); blur.release(); gx.release(); col.release()
+        // Smooth over ~2% of the width so the gutter's two edges merge into one peak, and
+        // prefer the centre a little, where the spine is when the book is framed.
+        val r = max(2, w / 50)
+        var best = w / 2; var bestV = -1.0
+        for (x in (0.25 * w).toInt()..(0.75 * w).toInt()) {
+            var s = 0.0
+            for (d in -r..r) s += profile[(x + d).coerceIn(0, w - 1)]
+            s *= 1.0 - 0.5 * abs(x - w / 2.0) / w
+            if (s > bestV) { bestV = s; best = x }
+        }
+        return best.toDouble()
+    }
+
+    /**
+     * The page outline inside [area] (a quad in [src]). Everything outside the area is blacked
+     * out first, so the page's spine side shows up as a clean border, then the live detector,
+     * which is strict about background clutter, looks for the page.
+     */
+    private fun pageIn(src: Mat, area: List<Point>): List<Point>? {
+        val mask = Mat.zeros(src.size(), CvType.CV_8UC1)
+        Imgproc.fillConvexPoly(mask, MatOfPoint(*area.toTypedArray()), org.opencv.core.Scalar(255.0))
+        val only = Mat.zeros(src.size(), src.type())
+        src.copyTo(only, mask)
+        val q = detectLive(only, null)
+        mask.release(); only.release()
+        // A page that is only a small part of its half is more likely a picture on the page.
+        return q?.takeIf { polyArea(it) > 0.35 * polyArea(area) }
+    }
+
     /** Orders four points as TL, TR, BR, BL. */
     fun order(p: List<Point>): List<Point> {
         val tl = p.minByOrNull { it.x + it.y }!!

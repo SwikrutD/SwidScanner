@@ -55,6 +55,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.FlashOff
 import androidx.compose.material.icons.outlined.FlashOn
 import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -79,6 +80,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
@@ -178,6 +180,7 @@ private fun CameraContent(nav: NavController, existingDocId: String?, retakePage
 
     var auto by remember { mutableStateOf(Settings.autoCapture) }
     var batch by remember { mutableStateOf(Settings.batchMode && retakePageId == null) }
+    var book by remember { mutableStateOf(Settings.bookMode && retakePageId == null) }
     var torch by remember { mutableStateOf(false) }
     var docId by remember { mutableStateOf(existingDocId) }
     var captured by remember { mutableIntStateOf(0) }
@@ -298,16 +301,23 @@ private fun CameraContent(nav: NavController, existingDocId: String?, retakePage
                     try {
                         val (id, pageId, thumb) = withContext(NonCancellable + Dispatchers.Default) {
                             val bmp = Images.rotate(Images.scaleDown(raw, Images.CAPTURE_MAX), rotation)
-                            val corners = Images.detectCorners(bmp) ?: liveQuad?.map { Corner(it.x, it.y) }
                             val id = ensureDoc()
-                            val page = if (retakePageId != null) DocStore.replaceImage(id, retakePageId, bmp, corners)
-                            else DocStore.addPage(id, bmp, corners, Settings.defaultFilter)
+                            val page = if (book) {
+                                // Book mode: one photo, two pages that share it with different corners.
+                                val (left, right) = Images.splitBook(bmp)
+                                DocStore.addPage(id, bmp, left, Settings.defaultFilter)
+                                    .also { DocStore.addPage(id, bmp, right, Settings.defaultFilter) }
+                            } else {
+                                val corners = Images.detectCorners(bmp) ?: liveQuad?.map { Corner(it.x, it.y) }
+                                if (retakePageId != null) DocStore.replaceImage(id, retakePageId, bmp, corners)
+                                else DocStore.addPage(id, bmp, corners, Settings.defaultFilter)
+                            }
                             bmp.recycle()
                             val t = Images.decodeFile(DocStore.thumbFile(id, page), 240).asImageBitmap()
                             Triple(id, page.id, t)
                         }
                         lastThumb = thumb
-                        captured++
+                        captured += if (book) 2 else 1
                         if (!batch) {
                             nav.popBackStack()
                             val thenDoc = if (retakePageId != null) retakeThenDoc else existingDocId == null
@@ -407,6 +417,7 @@ private fun CameraContent(nav: NavController, existingDocId: String?, retakePage
                 Spacer(Modifier.weight(1f))
                 Text(
                     when {
+                        book -> "Line up the spine with the line"
                         quad == null -> "Looking for a page"
                         auto && progress > 0f -> "Hold steady"
                         else -> "Page found"
@@ -428,6 +439,14 @@ private fun CameraContent(nav: NavController, existingDocId: String?, retakePage
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                     )
                 }
+                if (retakePageId == null) {
+                    IconButton(onClick = { book = !book; Settings.bookMode = book }) {
+                        Icon(
+                            Icons.AutoMirrored.Outlined.MenuBook, if (book) "Book mode on" else "Book mode off",
+                            tint = if (book) Ready else Color.White,
+                        )
+                    }
+                }
                 IconButton(onClick = { torch = !torch }) {
                     Icon(if (torch) Icons.Outlined.FlashOn else Icons.Outlined.FlashOff, "Torch", tint = Color.White)
                 }
@@ -445,6 +464,14 @@ private fun CameraContent(nav: NavController, existingDocId: String?, retakePage
                         )
                         debugFrame?.let { outline(it, DebugCyan) }
                         debugQuad?.let { outline(it, DebugCyan) }
+                        if (book) {
+                            // Spine guide. The single-page outline would only confuse here.
+                            drawLine(
+                                Color.White.copy(alpha = 0.8f), Offset(size.width / 2, 0f), Offset(size.width / 2, size.height),
+                                strokeWidth = 2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(14.dp.toPx(), 10.dp.toPx())),
+                            )
+                            return@Canvas
+                        }
                         val q = quad ?: return@Canvas
                         val pts = q.map { Offset(it.x * size.width, it.y * size.height) }
                         val path = Path().apply {

@@ -61,6 +61,16 @@ object Settings {
         get() = p.getBoolean("driveLinked", false)
         set(v) = p.edit { putBoolean("driveLinked", v) }
 
+    /** Split each capture of an open book into its left and right page. */
+    var bookMode: Boolean
+        get() = p.getBoolean("bookMode", false)
+        set(v) = p.edit { putBoolean("bookMode", v) }
+
+    /** Name new documents after the largest line of text on their first page. */
+    var autoName: Boolean
+        get() = p.getBoolean("autoName", true)
+        set(v) = p.edit { putBoolean("autoName", v) }
+
     /** Save to the phone folder (when one is chosen). Lets the folder stay set while saving elsewhere only. */
     var saveToFolder: Boolean
         get() = p.getBoolean("saveToFolder", true)

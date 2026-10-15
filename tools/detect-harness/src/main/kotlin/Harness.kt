@@ -33,6 +33,25 @@ fun main(args: Array<String>) {
         println("chroma -> ${withChroma(listOf(f))[0]?.map { "(${it.x.toInt()},${it.y.toInt()})" }}")
         return
     }
+    if (args[0] == "book") {
+        // book <frames dir> <out>: book mode split on 4 frames per session, drawn into one sheet per session.
+        val out = java.io.File(args[2]).apply { mkdirs() }
+        val sessions = java.io.File(args[1]).listFiles { f -> java.io.File(f, "session.json").exists() }!!.sorted()
+        for (s in sessions) {
+            val frames = loadFrames(s)
+            val tiles = (0 until 4).map { frames[it * (frames.size - 1) / 3] }.map { f ->
+                val img = f.color()!!
+                val b = DocProcessing.splitBook(img)
+                Imgproc.line(img, b.spineTop, b.spineBottom, Scalar(0.0, 0.0, 255.0), 2)
+                for ((q, c) in listOf(b.left to Scalar(0.0, 220.0, 0.0), b.right to Scalar(255.0, 160.0, 0.0)))
+                    for (i in 0 until 4) Imgproc.line(img, q[i], q[(i + 1) % 4], c, 2)
+                img
+            }
+            val sheet = Mat(); org.opencv.core.Core.hconcat(tiles, sheet)
+            Imgcodecs.imwrite(java.io.File(out, "book_${s.name}.jpg").path, sheet)
+        }
+        return
+    }
     if (args[0] == "grid") {
         // grid <image> <out> [x,y x,y x,y x,y]: overlays a 20 px grid (labels every 100) and an optional quad, for hand labelling truth.
         val img = Imgcodecs.imread(args[1])

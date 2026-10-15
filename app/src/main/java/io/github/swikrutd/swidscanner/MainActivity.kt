@@ -1,5 +1,7 @@
 package io.github.swikrutd.swidscanner
 
+import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -12,6 +14,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -31,8 +35,12 @@ import io.github.swikrutd.swidscanner.ui.SettingsScreen
 import io.github.swikrutd.swidscanner.ui.SwidTheme
 
 class MainActivity : ComponentActivity() {
+    /** Screen to open on top of the current one, from the Scan shortcut, the quick settings tile or adb. */
+    private var route by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) route = routeFor(intent)
         setContent {
             val mode by Settings.theme.collectAsState()
             val dark = when (mode) {
@@ -48,8 +56,28 @@ class MainActivity : ComponentActivity() {
                 )
                 onDispose {}
             }
-            SwidTheme(dark) { AppNav(intent?.getStringExtra("route")) }
+            SwidTheme(dark) { AppNav(route) { route = null } }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        routeFor(intent)?.let { route = it }
+    }
+
+    private fun routeFor(intent: Intent?): String? = when {
+        intent?.action == ACTION_SCAN -> Routes.camera()
+        // Debug and bench builds: `adb shell am start -n <pkg>/io.github.swikrutd.swidscanner.MainActivity --es route camera`
+        BuildConfigInfo.isDev -> intent?.getStringExtra("route")
+        else -> null
+    }
+
+    companion object {
+        /** Opens the camera for a new document. */
+        const val ACTION_SCAN = "io.github.swikrutd.swidscanner.SCAN"
+
+        fun scanIntent(ctx: Context): Intent = Intent(ACTION_SCAN).setClass(ctx, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     }
 }
 
@@ -58,11 +86,11 @@ private val LIGHT_SCRIM = Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
 private val DARK_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
 
 @Composable
-private fun AppNav(startRoute: String?) {
+private fun AppNav(route: String?, onRouted: () -> Unit) {
     val nav = rememberNavController()
-    // Debug and bench builds: `adb shell am start -n <pkg>/io.github.swikrutd.swidscanner.MainActivity --es route camera`
-    // opens a screen directly.
-    LaunchedEffect(startRoute) { if (BuildConfigInfo.isDev && startRoute != null) nav.navigate(startRoute) }
+    LaunchedEffect(route) {
+        if (route != null) { nav.navigate(route); onRouted() }
+    }
     NavHost(navController = nav, startDestination = Routes.HOME) {
         composable(Routes.HOME) { HomeScreen(nav) }
         composable(
