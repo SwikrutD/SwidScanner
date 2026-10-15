@@ -1,0 +1,448 @@
+package io.github.swikrutd.swidscanner.ui
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.SystemClock
+import android.util.Size
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.lifecycle.awaitInstance
+import androidx.camera.view.PreviewView
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.FlashOff
+import androidx.compose.material.icons.outlined.FlashOn
+import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.navigation.NavController
+import io.github.swikrutd.swidscanner.core.DocProcessing
+import io.github.swikrutd.swidscanner.data.Corner
+import io.github.swikrutd.swidscanner.data.DocStore
+import io.github.swikrutd.swidscanner.data.Settings
+import io.github.swikrutd.swidscanner.imaging.Images
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import org.opencv.core.CvType
+import org.opencv.core.Mat
+import java.util.concurrent.Executors
+import kotlin.math.abs
+import kotlin.math.max
+
+private val Ready = Color(0xFF4CD787)
+private val Searching = Color(0xFFF2A541)
+
+@Composable
+fun CameraScreen(nav: NavController, existingDocId: String?) {
+    RequireCamera(nav) { CameraContent(nav, existingDocId) }
+}
+
+/** Shows [content] once camera permission is granted, asking for it first. */
+@Composable
+fun RequireCamera(nav: NavController, content: @Composable () -> Unit) {
+    val ctx = LocalContext.current
+    var granted by remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+    }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
+    LaunchedEffect(Unit) { if (!granted) ask.launch(Manifest.permission.CAMERA) }
+
+    if (granted) {
+        content()
+    } else {
+        Column(
+            Modifier.fillMaxSize().background(Color.Black).systemBarsPadding().padding(32.dp),
+            verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("Camera access is needed for scanning.", color = Color.White, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = { ask.launch(Manifest.permission.CAMERA) }) { Text("Allow camera") }
+            TextButton(onClick = { nav.popBackStack() }) { Text("Cancel", color = Color.White) }
+        }
+    }
+}
+
+/** Auto-capture bookkeeping. Lives outside Compose state because it changes every frame. */
+private class AutoState {
+    var last: List<Offset>? = null
+    var stableSince = 0L
+    var armed = true
+    var lastShot = 0L
+}
+
+@Composable
+private fun CameraContent(nav: NavController, existingDocId: String?) {
+    val ctx = LocalContext.current
+    val owner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
+
+    var auto by remember { mutableStateOf(Settings.autoCapture) }
+    var batch by remember { mutableStateOf(Settings.batchMode) }
+    var torch by remember { mutableStateOf(false) }
+    var docId by remember { mutableStateOf(existingDocId) }
+    var captured by remember { mutableIntStateOf(0) }
+    var pending by remember { mutableIntStateOf(0) }
+    var capturing by remember { mutableStateOf(false) }
+    var lastThumb by remember { mutableStateOf<ImageBitmap?>(null) }
+    var quad by remember { mutableStateOf<List<Offset>?>(null) }
+    var progress by remember { mutableFloatStateOf(0f) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var camera by remember { mutableStateOf<Camera?>(null) }
+    val flash = remember { Animatable(0f) }
+    val autoState = remember { AutoState() }
+    val docMutex = remember { Mutex() }
+
+    val previewView = remember { PreviewView(ctx).apply { scaleType = PreviewView.ScaleType.FIT_CENTER } }
+    val ratio43 = remember {
+        ResolutionSelector.Builder().setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY).build()
+    }
+    val imageCapture = remember {
+        ImageCapture.Builder()
+            .setResolutionSelector(ratio43)
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .build()
+    }
+    val analysis = remember {
+        ImageAnalysis.Builder()
+            .setResolutionSelector(
+                ResolutionSelector.Builder()
+                    .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+                    .setResolutionStrategy(ResolutionStrategy(Size(640, 480), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                    .build(),
+            )
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .build()
+    }
+    val executor = remember { Executors.newSingleThreadExecutor() }
+    DisposableEffect(Unit) { onDispose { analysis.clearAnalyzer(); executor.shutdown() } }
+
+    suspend fun ensureDoc(): String = docMutex.withLock {
+        docId ?: DocStore.createDoc().id.also { docId = it }
+    }
+
+    fun finish() {
+        scope.launch {
+            while (pending > 0) delay(100)
+            val id = docId
+            nav.popBackStack()
+            if (id != null && existingDocId == null) nav.navigate(Routes.doc(id))
+        }
+    }
+
+    fun capture() {
+        if (capturing) return
+        capturing = true
+        autoState.armed = false
+        autoState.lastShot = SystemClock.uptimeMillis()
+        val liveQuad = quad
+        imageCapture.takePicture(ContextCompat.getMainExecutor(ctx), object : ImageCapture.OnImageCapturedCallback() {
+            override fun onCaptureSuccess(image: ImageProxy) {
+                val rotation = image.imageInfo.rotationDegrees
+                val raw = try { image.toBitmap() } finally { image.close() }
+                capturing = false
+                pending++
+                scope.launch { flash.snapTo(0.7f); flash.animateTo(0f, tween(260)) }
+                scope.launch {
+                    try {
+                        val (id, pageId, thumb) = withContext(NonCancellable + Dispatchers.Default) {
+                            val bmp = Images.rotate(Images.scaleDown(raw, Images.CAPTURE_MAX), rotation)
+                            val corners = Images.detectCorners(bmp) ?: liveQuad?.map { Corner(it.x, it.y) }
+                            val id = ensureDoc()
+                            val page = DocStore.addPage(id, bmp, corners, Settings.defaultFilter)
+                            bmp.recycle()
+                            val t = Images.decodeFile(DocStore.thumbFile(id, page), 240).asImageBitmap()
+                            Triple(id, page.id, t)
+                        }
+                        lastThumb = thumb
+                        captured++
+                        if (!batch) {
+                            nav.popBackStack()
+                            nav.navigate(Routes.crop(id, pageId, thenDoc = existingDocId == null))
+                        }
+                    } catch (e: Exception) {
+                        message = "Couldn't save the page: ${e.message}"
+                    } finally {
+                        pending--
+                    }
+                }
+            }
+
+            override fun onError(exception: ImageCaptureException) {
+                capturing = false
+                message = "Capture failed: ${exception.message}"
+            }
+        })
+    }
+
+    fun onFrame(q: List<Offset>?) {
+        quad = q
+        val now = SystemClock.uptimeMillis()
+        val st = autoState
+        if (q == null) {
+            st.last = null
+            if (now - st.lastShot > 700) st.armed = true
+            progress = 0f
+            return
+        }
+        val prev = st.last
+        val delta = if (prev == null) 1f else prev.indices.maxOf { max(abs(prev[it].x - q[it].x), abs(prev[it].y - q[it].y)) }
+        if (delta > 0.02f) st.stableSince = now
+        // Moving the page (or turning to the next one) re-arms auto-capture.
+        if (delta > 0.06f && now - st.lastShot > 700) st.armed = true
+        st.last = q
+        val area = DocProcessing.polyArea(q.map { org.opencv.core.Point(it.x.toDouble(), it.y.toDouble()) })
+        val eligible = auto && st.armed && !capturing && (batch || pending == 0) && area > 0.12
+        val held = now - st.stableSince
+        progress = if (eligible) (held / 1000f).coerceIn(0f, 1f) else 0f
+        if (eligible && held >= 1000 && now - st.lastShot > 1200) {
+            progress = 0f
+            capture()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        analysis.setAnalyzer(executor) { image ->
+            val q = try { detectFrame(image) } catch (_: Throwable) { null } finally { image.close() }
+            ContextCompat.getMainExecutor(ctx).execute { onFrame(q) }
+        }
+        val provider = ProcessCameraProvider.awaitInstance(ctx)
+        val preview = Preview.Builder().setResolutionSelector(ratio43).build()
+        preview.setSurfaceProvider(previewView.surfaceProvider)
+        provider.unbindAll()
+        camera = try {
+            provider.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture, analysis)
+        } catch (e: Exception) {
+            message = "Couldn't open the camera: ${e.message}"
+            null
+        }
+    }
+    LaunchedEffect(torch, camera) { camera?.cameraControl?.enableTorch(torch) }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        pending++
+        scope.launch {
+            try {
+                val id = ensureDoc()
+                importImages(ctx, uris, id)
+                captured += uris.size
+            } finally { pending-- }
+            finish()
+        }
+    }
+
+    BackHandler { finish() }
+
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        Column(Modifier.fillMaxSize().systemBarsPadding()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { finish() }) { Icon(Icons.Outlined.Close, "Close", tint = Color.White) }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    when {
+                        quad == null -> "Looking for a page"
+                        auto && progress > 0f -> "Hold steady"
+                        else -> "Page found"
+                    },
+                    color = Color.White, fontSize = 14.sp,
+                )
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = { torch = !torch }) {
+                    Icon(if (torch) Icons.Outlined.FlashOn else Icons.Outlined.FlashOff, "Torch", tint = Color.White)
+                }
+            }
+
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Box(Modifier.aspectRatio(3f / 4f)) {
+                    AndroidView({ previewView }, Modifier.fillMaxSize())
+                    Canvas(Modifier.fillMaxSize()) {
+                        val q = quad ?: return@Canvas
+                        val pts = q.map { Offset(it.x * size.width, it.y * size.height) }
+                        val path = Path().apply {
+                            moveTo(pts[0].x, pts[0].y)
+                            for (i in 1 until 4) lineTo(pts[i].x, pts[i].y)
+                            close()
+                        }
+                        val c = if (progress > 0f) Ready else Searching
+                        drawPath(path, c.copy(alpha = 0.18f + 0.22f * progress))
+                        drawPath(path, c, style = Stroke(width = 3.dp.toPx(), join = StrokeJoin.Round, cap = StrokeCap.Round))
+                        pts.forEach { drawCircle(c, 6.dp.toPx(), it) }
+                    }
+                    Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flash.value)))
+                }
+            }
+
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.Center) {
+                ModeToggle("Auto", "Manual", auto) { auto = it; Settings.autoCapture = it }
+                Spacer(Modifier.width(12.dp))
+                ModeToggle("Batch", "Single", batch) { batch = it; Settings.batchMode = it }
+            }
+
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                    Icon(Icons.Outlined.PhotoLibrary, "Import from gallery", tint = Color.White, modifier = Modifier.size(30.dp))
+                }
+                Shutter(progress = progress, busy = capturing || (!batch && pending > 0)) { if (batch || pending == 0) capture() }
+                Box(Modifier.size(60.dp), contentAlignment = Alignment.Center) {
+                    val t = lastThumb
+                    if (t != null && captured > 0) {
+                        Box(Modifier.clickable { finish() }) {
+                            Image(
+                                t, "Finish", contentScale = ContentScale.Crop,
+                                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(8.dp)).border(2.dp, Color.White, RoundedCornerShape(8.dp)),
+                            )
+                            Box(
+                                Modifier.align(Alignment.TopEnd).offset(6.dp, (-6).dp).size(22.dp)
+                                    .background(MaterialTheme.colorScheme.secondary, CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) { Text("$captured", color = MaterialTheme.colorScheme.onSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                        }
+                    } else if (pending > 0) {
+                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
+                    }
+                }
+            }
+            if (batch && captured > 0) {
+                Text(
+                    "Tap the thumbnail when you're done", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp,
+                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp),
+                )
+            }
+        }
+        message?.let { m ->
+            Text(
+                m, color = Color.White,
+                modifier = Modifier.align(Alignment.Center).padding(24.dp)
+                    .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(10.dp)).padding(16.dp)
+                    .clickable { message = null },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ModeToggle(on: String, off: String, value: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.12f)).padding(3.dp)) {
+        listOf(on to true, off to false).forEach { (label, v) ->
+            val selected = value == v
+            Text(
+                label,
+                color = if (selected) Color.Black else Color.White,
+                fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.clip(RoundedCornerShape(50))
+                    .background(if (selected) Color.White else Color.Transparent)
+                    .clickable { onChange(v) }
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun Shutter(progress: Float, busy: Boolean, onClick: () -> Unit) {
+    Box(Modifier.size(78.dp).clickable(enabled = !busy, onClick = onClick), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            drawCircle(Color.White, style = Stroke(4.dp.toPx()))
+            if (progress > 0f) {
+                drawArc(Ready, -90f, 360f * progress, false, style = Stroke(5.dp.toPx(), cap = StrokeCap.Round))
+            }
+            drawCircle(if (busy) Color.White.copy(alpha = 0.4f) else Color.White, radius = size.minDimension / 2 - 9.dp.toPx())
+        }
+    }
+}
+
+/** Runs page detection on the luminance plane of a preview frame. Result is normalised to the upright frame. */
+private fun detectFrame(image: ImageProxy): List<Offset>? {
+    val plane = image.planes[0]
+    val w = image.width; val h = image.height; val rs = plane.rowStride
+    val buf = plane.buffer
+    val bytes = ByteArray(w * h)
+    if (rs == w) buf.get(bytes, 0, w * h) else for (y in 0 until h) { buf.position(y * rs); buf.get(bytes, y * w, w) }
+    val m = Mat(h, w, CvType.CV_8UC1)
+    m.put(0, 0, bytes)
+    val up = DocProcessing.rotate(m, image.imageInfo.rotationDegrees)
+    m.release()
+    val q = DocProcessing.detect(up)
+    val uw = up.cols().toDouble(); val uh = up.rows().toDouble()
+    up.release()
+    return q?.map { Offset((it.x / uw).toFloat(), (it.y / uh).toFloat()) }
+}

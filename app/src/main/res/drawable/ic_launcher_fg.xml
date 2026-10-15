@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Original mark: a page inside four scan brackets. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- page -->
+    <path android:fillColor="#FFF4EFE6"
+        android:pathData="M42,36 L60,36 L68,44 L68,72 L42,72 Z" />
+    <path android:fillColor="#FFC9BFAE"
+        android:pathData="M60,36 L60,44 L68,44 Z" />
+    <path android:fillColor="#FF0F3D3E"
+        android:pathData="M47,52 h16 v2.4 h-16 z M47,58 h16 v2.4 h-16 z M47,64 h11 v2.4 h-11 z" />
+    <!-- brackets -->
+    <path android:strokeColor="#FFF2A541" android:strokeWidth="3.5" android:strokeLineCap="round"
+        android:pathData="M32,40 L32,30 L42,30 M66,30 L76,30 L76,40 M76,68 L76,78 L66,78 M42,78 L32,78 L32,68" />
+</vector>
