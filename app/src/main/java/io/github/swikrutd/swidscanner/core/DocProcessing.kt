@@ -39,6 +39,8 @@ object DocProcessing {
     var debugSupport: ((Mat) -> Unit)? = null
 
     private const val DETECT_SIZE = 640.0
+    /** Live frames are detected smaller: the tracker smooths the result and the capture is re-detected at full size. */
+    private const val LIVE_DETECT_SIZE = 400.0
     private const val SUPPORT_CANNY_LO = 30.0
     /** Every side must sit on an edge for at least this share of its length. */
     private const val MIN_SIDE_SUPPORT = 0.35
@@ -168,7 +170,7 @@ object DocProcessing {
      * page merged with its surroundings) and the inside must look like paper.
      */
     private fun detectLive(src: Mat, chroma: Mat?): List<Point>? {
-        val scale = DETECT_SIZE / max(src.cols(), src.rows())
+        val scale = LIVE_DETECT_SIZE / max(src.cols(), src.rows())
         val small = Mat()
         if (scale < 1.0) Imgproc.resize(src, small, Size(), scale, scale, Imgproc.INTER_AREA) else src.copyTo(small)
         val gray = toGray(small)

@@ -9,6 +9,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.navigation.NavType
@@ -47,7 +48,7 @@ class MainActivity : ComponentActivity() {
                 )
                 onDispose {}
             }
-            SwidTheme(dark) { AppNav() }
+            SwidTheme(dark) { AppNav(intent?.getStringExtra("route")) }
         }
     }
 }
@@ -57,8 +58,11 @@ private val LIGHT_SCRIM = Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
 private val DARK_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
 
 @Composable
-private fun AppNav() {
+private fun AppNav(startRoute: String?) {
     val nav = rememberNavController()
+    // Debug and bench builds: `adb shell am start -n <pkg>/io.github.swikrutd.swidscanner.MainActivity --es route camera`
+    // opens a screen directly.
+    LaunchedEffect(startRoute) { if (BuildConfigInfo.isDev && startRoute != null) nav.navigate(startRoute) }
     NavHost(navController = nav, startDestination = Routes.HOME) {
         composable(Routes.HOME) { HomeScreen(nav) }
         composable(

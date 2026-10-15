@@ -94,6 +94,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavController
 import io.github.swikrutd.swidscanner.BuildConfig
+import io.github.swikrutd.swidscanner.BuildConfigInfo
 import io.github.swikrutd.swidscanner.core.DocProcessing
 import io.github.swikrutd.swidscanner.core.QuadTracker
 import io.github.swikrutd.swidscanner.data.Corner
@@ -222,6 +223,7 @@ private fun CameraContent(nav: NavController, existingDocId: String?, retakePage
     var debugFrame by remember { mutableStateOf<List<Offset>?>(null) }
     var debugQuad by remember { mutableStateOf<List<Offset>?>(null) }
     var lastMapLog by remember { mutableStateOf(0L) }
+    var lastTimingLog by remember { mutableStateOf(0L) }
     DisposableEffect(Unit) { onDispose { analysis.clearAnalyzer(); executor.shutdown(); dump?.shutdown() } }
 
     fun describe(r: ResolutionInfo?) = r?.let { "${it.resolution} crop=${it.cropRect.toShortString()} rot=${it.rotationDegrees}" } ?: "null"
@@ -251,8 +253,7 @@ private fun CameraContent(nav: NavController, existingDocId: String?, retakePage
         val now = SystemClock.uptimeMillis()
         if (now - lastMapLog > 3000) {
             lastMapLog = now
-            val n = analysisFrames.getAndSet(0)
-            Log.i(TAG, "camera ${cameraInfo()} analysis ${if (n > 0) analysisMs.getAndSet(0) / n else 0} ms/frame, $n frames")
+            Log.i(TAG, "camera ${cameraInfo()}")
         }
     }
 
@@ -355,6 +356,14 @@ private fun CameraContent(nav: NavController, existingDocId: String?, retakePage
             val r = try { analyzeFrame(image, tracker, dump) } catch (_: Throwable) { FrameResult(null, null, 0f, 0f, null) } finally { image.close() }
             analysisMs.addAndGet(SystemClock.uptimeMillis() - t0); analysisFrames.incrementAndGet()
             ContextCompat.getMainExecutor(ctx).execute {
+                if (BuildConfigInfo.isDev) {
+                    val now = SystemClock.uptimeMillis()
+                    if (now - lastTimingLog > 3000) {
+                        lastTimingLog = now
+                        val n = analysisFrames.getAndSet(0)
+                        Log.i(TAG, "analysis ${if (n > 0) analysisMs.getAndSet(0) / n else 0} ms/frame, $n frames")
+                    }
+                }
                 onFrame(r.quad)
                 if (BuildConfig.DEBUG) debugMap(r)
             }

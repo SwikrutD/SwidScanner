@@ -48,6 +48,14 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (keystoreProps.isNotEmpty()) signingConfig = signingConfigs.getByName("release")
         }
+        // Release speed for timing live detection on a phone. Signed with the debug key and
+        // installed beside the other builds as io.github.swikrutd.swidscanner.bench.
+        create("bench") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            applicationIdSuffix = ".bench"
+            matchingFallbacks += "release"
+        }
     }
 
     compileOptions {
