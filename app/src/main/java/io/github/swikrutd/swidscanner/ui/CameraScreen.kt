@@ -2,7 +2,9 @@ package io.github.swikrutd.swidscanner.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.SystemClock
+import android.util.Log
 import android.util.Size
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -15,12 +17,16 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.ResolutionInfo
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.lifecycle.awaitInstance
 import androidx.camera.view.PreviewView
+import androidx.camera.view.transform.CoordinateTransform
+import androidx.camera.view.transform.ImageProxyTransformFactory
+import androidx.camera.view.transform.OutputTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -87,6 +93,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavController
+import io.github.swikrutd.swidscanner.BuildConfig
 import io.github.swikrutd.swidscanner.core.DocProcessing
 import io.github.swikrutd.swidscanner.data.Corner
 import io.github.swikrutd.swidscanner.data.DocStore
@@ -100,13 +107,19 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.opencv.core.CvType
+import org.json.JSONArray
+import org.json.JSONObject
 import org.opencv.core.Mat
+import org.opencv.core.Point
+import java.io.File
 import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.max
 
 private val Ready = Color(0xFF4CD787)
 private val Searching = Color(0xFFF2A541)
+private val DebugCyan = Color(0xFF3FD0FF)
+private const val TAG = "SwidCam"
 
 @Composable
 fun CameraScreen(nav: NavController, existingDocId: String?) {
@@ -145,6 +158,9 @@ private class AutoState {
     var armed = true
     var lastShot = 0L
 }
+
+/** One analysed frame: the quad normalised to the upright frame plus what the debug overlay needs. */
+private class FrameResult(val quad: List<Offset>?, val w: Float, val h: Float, val source: OutputTransform?)
 
 @Composable
 private fun CameraContent(nav: NavController, existingDocId: String?) {
@@ -189,8 +205,46 @@ private fun CameraContent(nav: NavController, existingDocId: String?) {
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
     }
+    val preview = remember { Preview.Builder().setResolutionSelector(ratio43).build() }
     val executor = remember { Executors.newSingleThreadExecutor() }
-    DisposableEffect(Unit) { onDispose { analysis.clearAnalyzer(); executor.shutdown() } }
+    val dump = remember { if (BuildConfig.DEBUG) FrameDump(File(ctx.filesDir, "frames")) else null }
+    var dumping by remember { mutableStateOf(false) }
+    var dumpSaved by remember { mutableIntStateOf(0) }
+    var debugFrame by remember { mutableStateOf<List<Offset>?>(null) }
+    var debugQuad by remember { mutableStateOf<List<Offset>?>(null) }
+    var lastMapLog by remember { mutableStateOf(0L) }
+    DisposableEffect(Unit) { onDispose { analysis.clearAnalyzer(); executor.shutdown(); dump?.shutdown() } }
+
+    fun describe(r: ResolutionInfo?) = r?.let { "${it.resolution} crop=${it.cropRect.toShortString()} rot=${it.rotationDegrees}" } ?: "null"
+
+    fun cameraInfo() = JSONObject()
+        .put("device", "${Build.MANUFACTURER} ${Build.MODEL} (${Build.DEVICE}) Android ${Build.VERSION.RELEASE}")
+        .put("preview", describe(preview.resolutionInfo))
+        .put("analysis", describe(analysis.resolutionInfo))
+        .put("capture", describe(imageCapture.resolutionInfo))
+        .put("sensorRotation", camera?.cameraInfo?.sensorRotationDegrees ?: -1)
+        .put("previewView", "${previewView.width}x${previewView.height} mode=${previewView.implementationMode}")
+        .put("analysisFrameInView", debugFrame?.let { f -> JSONArray(f.map { "%.1f,%.1f".format(it.x, it.y) }) } ?: JSONObject.NULL)
+
+    /** Debug: maps the analysis frame and quad into the view with CameraX's own transform, to check our overlay maths. */
+    fun debugMap(r: FrameResult) {
+        val src = r.source ?: return
+        val target = previewView.outputTransform ?: return
+        val ct = CoordinateTransform(src, target)
+        fun map(pts: List<Offset>): List<Offset> {
+            val a = FloatArray(8)
+            pts.forEachIndexed { i, p -> a[2 * i] = p.x; a[2 * i + 1] = p.y }
+            ct.mapPoints(a)
+            return List(4) { Offset(a[2 * it], a[2 * it + 1]) }
+        }
+        debugFrame = map(listOf(Offset(0f, 0f), Offset(r.w, 0f), Offset(r.w, r.h), Offset(0f, r.h)))
+        debugQuad = r.quad?.let { q -> map(q.map { Offset(it.x * r.w, it.y * r.h) }) }
+        val now = SystemClock.uptimeMillis()
+        if (now - lastMapLog > 3000) {
+            lastMapLog = now
+            Log.i(TAG, "camera ${cameraInfo()}")
+        }
+    }
 
     suspend fun ensureDoc(): String = docMutex.withLock {
         docId ?: DocStore.createDoc().id.also { docId = it }
@@ -252,6 +306,7 @@ private fun CameraContent(nav: NavController, existingDocId: String?) {
 
     fun onFrame(q: List<Offset>?) {
         quad = q
+        if (dump != null) dumpSaved = dump.saved.get()
         val now = SystemClock.uptimeMillis()
         val st = autoState
         if (q == null) {
@@ -278,11 +333,13 @@ private fun CameraContent(nav: NavController, existingDocId: String?) {
 
     LaunchedEffect(Unit) {
         analysis.setAnalyzer(executor) { image ->
-            val q = try { detectFrame(image) } catch (_: Throwable) { null } finally { image.close() }
-            ContextCompat.getMainExecutor(ctx).execute { onFrame(q) }
+            val r = try { analyzeFrame(image, dump) } catch (_: Throwable) { FrameResult(null, 0f, 0f, null) } finally { image.close() }
+            ContextCompat.getMainExecutor(ctx).execute {
+                onFrame(r.quad)
+                if (BuildConfig.DEBUG) debugMap(r)
+            }
         }
         val provider = ProcessCameraProvider.awaitInstance(ctx)
-        val preview = Preview.Builder().setResolutionSelector(ratio43).build()
         preview.setSurfaceProvider(previewView.surfaceProvider)
         provider.unbindAll()
         camera = try {
@@ -323,6 +380,20 @@ private fun CameraContent(nav: NavController, existingDocId: String?) {
                     color = Color.White, fontSize = 14.sp,
                 )
                 Spacer(Modifier.weight(1f))
+                if (dump != null) {
+                    Text(
+                        if (dumping) "REC $dumpSaved" else "REC",
+                        color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clip(RoundedCornerShape(50))
+                            .background(if (dumping) Color.Red else Color.White.copy(alpha = 0.15f))
+                            .clickable {
+                                dumping = !dumping
+                                if (dumping) dump.start(cameraInfo()) else dump.stop()
+                                Log.i(TAG, if (dumping) "dump started in ${dump.dir}" else "dump stopped: ${dump.saved.get()} saved, ${dump.dropped.get()} dropped")
+                            }
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                }
                 IconButton(onClick = { torch = !torch }) {
                     Icon(if (torch) Icons.Outlined.FlashOn else Icons.Outlined.FlashOff, "Torch", tint = Color.White)
                 }
@@ -332,6 +403,13 @@ private fun CameraContent(nav: NavController, existingDocId: String?) {
                 Box(Modifier.aspectRatio(3f / 4f)) {
                     AndroidView({ previewView }, Modifier.fillMaxSize())
                     Canvas(Modifier.fillMaxSize()) {
+                        // Debug: where CameraX says the analysis frame and quad sit in the view.
+                        fun outline(p: List<Offset>, c: Color) = drawPath(
+                            Path().apply { moveTo(p[0].x, p[0].y); for (i in 1 until 4) lineTo(p[i].x, p[i].y); close() },
+                            c, style = Stroke(width = 1.5.dp.toPx()),
+                        )
+                        debugFrame?.let { outline(it, DebugCyan) }
+                        debugQuad?.let { outline(it, DebugCyan) }
                         val q = quad ?: return@Canvas
                         val pts = q.map { Offset(it.x * size.width, it.y * size.height) }
                         val path = Path().apply {
@@ -430,8 +508,8 @@ private fun Shutter(progress: Float, busy: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** Runs page detection on the luminance plane of a preview frame. Result is normalised to the upright frame. */
-private fun detectFrame(image: ImageProxy): List<Offset>? {
+/** Runs page detection on the luminance plane of a preview frame. The quad is normalised to the upright frame. */
+private fun analyzeFrame(image: ImageProxy, dump: FrameDump?): FrameResult {
     val plane = image.planes[0]
     val w = image.width; val h = image.height; val rs = plane.rowStride
     val buf = plane.buffer
@@ -441,8 +519,13 @@ private fun detectFrame(image: ImageProxy): List<Offset>? {
     m.put(0, 0, bytes)
     val up = DocProcessing.rotate(m, image.imageInfo.rotationDegrees)
     m.release()
-    val q = DocProcessing.detect(up)
-    val uw = up.cols().toDouble(); val uh = up.rows().toDouble()
+    val q: List<Point>? = DocProcessing.detect(up)
+    val uw = up.cols().toFloat(); val uh = up.rows().toFloat()
+    var source: OutputTransform? = null
+    if (BuildConfig.DEBUG) {
+        source = ImageProxyTransformFactory().apply { isUsingRotationDegrees = true }.getOutputTransform(image)
+        dump?.save(image, up, q)
+    }
     up.release()
-    return q?.map { Offset((it.x / uw).toFloat(), (it.y / uh).toFloat()) }
+    return FrameResult(q?.map { Offset((it.x / uw).toFloat(), (it.y / uh).toFloat()) }, uw, uh, source)
 }
