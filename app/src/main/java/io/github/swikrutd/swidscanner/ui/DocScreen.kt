@@ -3,11 +3,13 @@ package io.github.swikrutd.swidscanner.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -18,6 +20,7 @@ import androidx.compose.material.icons.outlined.AddAPhoto
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.TextSnippet
 import androidx.compose.material3.CircularProgressIndicator
@@ -44,12 +47,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import io.github.swikrutd.swidscanner.data.DocStore
+import io.github.swikrutd.swidscanner.export.Saver
+import io.github.swikrutd.swidscanner.export.rememberDriveAuthorizer
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -63,9 +69,24 @@ fun DocScreen(nav: NavController, docId: String) {
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
+    val drive = rememberDriveAuthorizer()
+    val saveStatus by Saver.status.collectAsState()
 
     LaunchedEffect(doc == null) { if (doc == null) nav.popBackStack() }
     if (doc == null) return
+
+    fun save() {
+        saving = true
+        scope.launch {
+            runCatching { Saver.savePdf(ctx, doc, auto = false) { drive.token() } }
+                .onFailure { Saver.setStatus(docId, "Save failed: ${it.message}") }
+            saving = false
+        }
+    }
+    // With no save location on yet, Save asks for a folder first.
+    val pickFolder = rememberFolderPicker { save() }
 
     Scaffold(
         topBar = {
@@ -78,8 +99,15 @@ fun DocScreen(nav: NavController, docId: String) {
                     IconButton(onClick = { nav.navigate(Routes.ocr(docId)) }, enabled = doc.pages.isNotEmpty()) {
                         Icon(Icons.Outlined.TextSnippet, "Extract text")
                     }
+                    IconButton(
+                        onClick = { if (Saver.hasDestination) save() else pickFolder.launch(null) },
+                        enabled = doc.pages.isNotEmpty() && !saving,
+                    ) {
+                        if (saving) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Outlined.Save, "Save as PDF")
+                    }
                     IconButton(onClick = { exporting = true }, enabled = doc.pages.isNotEmpty()) {
-                        Icon(Icons.Outlined.Share, "Save or share")
+                        Icon(Icons.Outlined.Share, "Share or export")
                     }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "More") }
@@ -101,31 +129,39 @@ fun DocScreen(nav: NavController, docId: String) {
             )
         },
     ) { pad ->
-        if (doc.pages.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(pad), Alignment.Center) {
-                Text("No pages. Tap Add pages to scan some.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.fillMaxSize().padding(pad)) {
+            saveStatus[docId]?.let { line ->
+                Text(
+                    line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 4.dp),
+                )
             }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(150.dp),
-                contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 120.dp),
-                modifier = Modifier.fillMaxSize().padding(pad),
-            ) {
-                itemsIndexed(doc.pages, key = { _, p -> p.id }) { i, p ->
-                    Box(Modifier.padding(8.dp).fillMaxWidth().aspectRatio(0.75f).clickable { nav.navigate(Routes.page(docId, p.id)) }) {
-                        AsyncImage(
-                            model = DocStore.thumbFile(docId, p), contentDescription = "Page ${i + 1}",
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize().shadow(2.dp, RoundedCornerShape(4.dp)).clip(RoundedCornerShape(4.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                        )
-                        Text(
-                            "${i + 1}", fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.align(Alignment.BottomCenter).padding(6.dp)
-                                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 2.dp),
-                        )
-                        if (p.id in busy) CircularProgressIndicator(Modifier.align(Alignment.Center))
+            if (doc.pages.isEmpty()) {
+                Box(Modifier.fillMaxSize(), Alignment.Center) {
+                    Text("No pages. Tap Add pages to scan some.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(150.dp),
+                    contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 120.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    itemsIndexed(doc.pages, key = { _, p -> p.id }) { i, p ->
+                        Box(Modifier.padding(8.dp).fillMaxWidth().aspectRatio(0.75f).clickable { nav.navigate(Routes.page(docId, p.id)) }) {
+                            AsyncImage(
+                                model = DocStore.thumbFile(docId, p), contentDescription = "Page ${i + 1}",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize().shadow(2.dp, RoundedCornerShape(4.dp)).clip(RoundedCornerShape(4.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                            )
+                            Text(
+                                "${i + 1}", fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.align(Alignment.BottomCenter).padding(6.dp)
+                                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 2.dp),
+                            )
+                            if (p.id in busy) CircularProgressIndicator(Modifier.align(Alignment.Center))
+                        }
                     }
                 }
             }

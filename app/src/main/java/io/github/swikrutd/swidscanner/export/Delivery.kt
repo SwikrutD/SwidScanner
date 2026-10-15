@@ -12,15 +12,21 @@ import java.io.File
 
 object Delivery {
 
-    /** Copies [files] into a folder the user granted through the system folder picker. */
-    suspend fun toFolder(ctx: Context, tree: Uri, files: List<File>, mime: String) = withContext(Dispatchers.IO) {
+    /**
+     * Copies [files] into a folder the user granted through the system folder picker.
+     * With [replace], a file of the same name is overwritten instead of saving "name (2)".
+     */
+    suspend fun toFolder(ctx: Context, tree: Uri, files: List<File>, mime: String, replace: Boolean = false) = withContext(Dispatchers.IO) {
         val dir = DocumentFile.fromTreeUri(ctx, tree)
         if (dir == null || !dir.canWrite()) error("Can't write to the save folder. Choose it again in Settings.")
         for (f in files) {
-            val name = uniqueName(dir, f.name)
-            val target = dir.createFile(mime, name) ?: error("Couldn't create $name in the save folder")
-            ctx.contentResolver.openOutputStream(target.uri)?.use { o -> f.inputStream().use { it.copyTo(o) } }
-                ?: error("Couldn't write $name")
+            val existing = if (replace) dir.findFile(f.name) else null
+            val target = existing ?: uniqueName(dir, f.name).let { name ->
+                dir.createFile(mime, name) ?: error("Couldn't create $name in the save folder")
+            }
+            // "wt" truncates, so a shorter new file doesn't keep the old file's tail.
+            ctx.contentResolver.openOutputStream(target.uri, "wt")?.use { o -> f.inputStream().use { it.copyTo(o) } }
+                ?: error("Couldn't write ${f.name}")
         }
     }
 

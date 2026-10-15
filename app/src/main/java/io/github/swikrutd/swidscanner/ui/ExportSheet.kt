@@ -54,10 +54,10 @@ import io.github.swikrutd.swidscanner.data.PageSize
 import io.github.swikrutd.swidscanner.data.Quality
 import io.github.swikrutd.swidscanner.data.Settings
 import io.github.swikrutd.swidscanner.export.Delivery
-import io.github.swikrutd.swidscanner.export.Drive
 import io.github.swikrutd.swidscanner.export.ExportOptions
 import io.github.swikrutd.swidscanner.export.Exporter
 import io.github.swikrutd.swidscanner.export.Format
+import io.github.swikrutd.swidscanner.export.Saver
 import io.github.swikrutd.swidscanner.export.rememberDriveAuthorizer
 import kotlinx.coroutines.launch
 import java.io.File
@@ -92,27 +92,8 @@ fun ExportSheet(doc: Doc, onDismiss: () -> Unit) {
     fun save() {
         working = true; status = null
         scope.launch {
-            val done = mutableListOf<String>()
-            val failed = mutableListOf<String>()
             try {
-                val files = build()
-                val mime = format.mime
-                folderUri?.let { uri ->
-                    runCatching { Delivery.toFolder(ctx, Uri.parse(uri), files, mime) }
-                        .onSuccess { done += "\"${Settings.folderName ?: "folder"}\"" }
-                        .onFailure { failed += "folder: ${it.message}" }
-                }
-                if (Settings.driveLinked) {
-                    runCatching {
-                        val token = drive.token()
-                        files.forEach { Drive.upload(token, Settings.driveFolder, it, mime) }
-                    }.onSuccess { done += "Google Drive/${Settings.driveFolder}" }
-                        .onFailure { failed += "Drive: ${it.message}" }
-                }
-                status = buildString {
-                    if (done.isNotEmpty()) append("Saved to ${done.joinToString(" and ")}.")
-                    if (failed.isNotEmpty()) { if (isNotEmpty()) append("\n"); append("Failed: ${failed.joinToString("; ")}") }
-                }
+                status = Saver.deliver(ctx, build(), format.mime, replace = false) { drive.token() }
             } catch (e: Exception) {
                 status = "Export failed: ${e.message}"
             } finally {
@@ -122,15 +103,7 @@ fun ExportSheet(doc: Doc, onDismiss: () -> Unit) {
     }
 
     // With no destination set, the first Save asks for a folder and remembers it.
-    val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            Settings.folderUri = uri.toString()
-            Settings.folderName = Delivery.folderLabel(ctx, uri)
-            folderUri = uri.toString()
-            save()
-        }
-    }
+    val pickFolder = rememberFolderPicker { folderUri = Settings.folderUri; save() }
 
     fun share() {
         working = true; status = null
@@ -185,11 +158,11 @@ fun ExportSheet(doc: Doc, onDismiss: () -> Unit) {
             }
 
             val dest = buildList {
-                Settings.folderName?.takeIf { folderUri != null }?.let { add("folder \"$it\"") }
-                if (Settings.driveLinked) add("Google Drive/${Settings.driveFolder}")
+                Settings.folderName?.takeIf { folderUri != null && Settings.saveToFolder }?.let { add("folder \"$it\"") }
+                if (Settings.driveActive) add("Google Drive/${Settings.driveFolder}")
             }
             Text(
-                if (dest.isEmpty()) "No save location set yet. Save will ask you to pick a folder."
+                if (dest.isEmpty()) "No save location is on. Save will ask you to pick a folder."
                 else "Save goes to ${dest.joinToString(" and ")}.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -202,12 +175,31 @@ fun ExportSheet(doc: Doc, onDismiss: () -> Unit) {
                     Icon(Icons.Outlined.Share, null); Text("  Share")
                 }
                 Button(
-                    onClick = { if (folderUri == null && !Settings.driveLinked) pickFolder.launch(null) else save() },
+                    onClick = { if (!Saver.hasDestination) pickFolder.launch(null) else save() },
                     enabled = !working, modifier = Modifier.weight(1f),
                 ) { Icon(Icons.Outlined.Save, null); Text("  Save") }
             }
             Spacer(Modifier.height(12.dp))
         }
+    }
+}
+
+/**
+ * System folder picker that remembers the chosen folder as the save folder (and turns
+ * saving to it on), then calls [onPicked].
+ */
+@Composable
+fun rememberFolderPicker(onPicked: () -> Unit = {}) = run {
+    val ctx = LocalContext.current
+    rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        Settings.folderUri?.let { old -> runCatching { ctx.contentResolver.releasePersistableUriPermission(Uri.parse(old), flags) } }
+        ctx.contentResolver.takePersistableUriPermission(uri, flags)
+        Settings.folderUri = uri.toString()
+        Settings.folderName = Delivery.folderLabel(ctx, uri)
+        Settings.saveToFolder = true
+        onPicked()
     }
 }
 

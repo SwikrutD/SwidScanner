@@ -61,6 +61,28 @@ object Settings {
         get() = p.getBoolean("driveLinked", false)
         set(v) = p.edit { putBoolean("driveLinked", v) }
 
+    /** Save to the phone folder (when one is chosen). Lets the folder stay set while saving elsewhere only. */
+    var saveToFolder: Boolean
+        get() = p.getBoolean("saveToFolder", true)
+        set(v) = p.edit { putBoolean("saveToFolder", v) }
+
+    /** Save to Google Drive (when linked), without having to unlink to stop. */
+    var saveToDrive: Boolean
+        get() = p.getBoolean("saveToDrive", true)
+        set(v) = p.edit { putBoolean("saveToDrive", v) }
+
+    /** Save a PDF of a document to the enabled locations shortly after it changes. */
+    var autoSave: Boolean
+        get() = p.getBoolean("autoSave", false)
+        set(v) = p.edit { putBoolean("autoSave", v) }
+
+    /** Phone folder to save to, or null if none is chosen or it is turned off. */
+    val activeFolder: String?
+        get() = folderUri?.takeIf { saveToFolder }
+
+    val driveActive: Boolean
+        get() = driveLinked && saveToDrive
+
     var driveFolder: String
         get() = p.getString("driveFolder", null) ?: "SwidScanner"
         set(v) = p.edit { putString("driveFolder", v.trim().ifEmpty { "SwidScanner" }) }

@@ -2,8 +2,6 @@ package io.github.swikrutd.swidscanner.ui
 
 import android.content.Intent
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -58,7 +56,6 @@ import io.github.swikrutd.swidscanner.data.PageSize
 import io.github.swikrutd.swidscanner.data.Quality
 import io.github.swikrutd.swidscanner.data.Settings
 import io.github.swikrutd.swidscanner.data.ThemeMode
-import io.github.swikrutd.swidscanner.export.Delivery
 import io.github.swikrutd.swidscanner.export.Drive
 import io.github.swikrutd.swidscanner.export.rememberDriveAuthorizer
 import kotlinx.coroutines.launch
@@ -84,17 +81,10 @@ fun SettingsScreen(nav: NavController) {
     var searchable by remember { mutableStateOf(Settings.searchablePdf) }
     val theme by Settings.theme.collectAsState()
 
-    val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            Settings.folderUri?.let { old ->
-                runCatching { ctx.contentResolver.releasePersistableUriPermission(Uri.parse(old), Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
-            }
-            ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            Settings.folderUri = uri.toString()
-            Settings.folderName = Delivery.folderLabel(ctx, uri)
-            folderName = Settings.folderName
-        }
-    }
+    var saveFolder by remember { mutableStateOf(Settings.saveToFolder) }
+    var saveDrive by remember { mutableStateOf(Settings.saveToDrive) }
+    var autoSave by remember { mutableStateOf(Settings.autoSave) }
+    val pickFolder = rememberFolderPicker { folderName = Settings.folderName; saveFolder = true }
 
     Scaffold(
         topBar = {
@@ -121,7 +111,7 @@ fun SettingsScreen(nav: NavController) {
             HorizontalDivider()
             Section("Save locations")
             Text(
-                "Scans stay inside the app. To put one in these locations, open the document, tap the share button at the top and choose Save. It writes a PDF (or images) to every location set here.",
+                "Scans stay inside the app. The Save button on a document writes it as a PDF to every location turned on here (both, if both are on). Share always works too.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
@@ -131,6 +121,10 @@ fun SettingsScreen(nav: NavController) {
                     Text("Phone folder")
                     Text(folderName ?: "Not set", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                Switch(saveFolder && folderName != null, { saveFolder = it; Settings.saveToFolder = it }, enabled = folderName != null)
+            }
+            Row(Modifier.padding(start = 36.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { pickFolder.launch(null) }) { Text(if (folderName == null) "Choose" else "Change") }
                 if (folderName != null) {
                     TextButton(onClick = {
                         Settings.folderUri?.let { old ->
@@ -139,7 +133,6 @@ fun SettingsScreen(nav: NavController) {
                         Settings.folderUri = null; Settings.folderName = null; folderName = null
                     }) { Text("Remove") }
                 }
-                OutlinedButton(onClick = { pickFolder.launch(null) }) { Text(if (folderName == null) "Choose" else "Change") }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -148,6 +141,9 @@ fun SettingsScreen(nav: NavController) {
                     Text("Google Drive")
                     Text(if (linked) "Linked" else "Not linked", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                Switch(saveDrive && linked, { saveDrive = it; Settings.saveToDrive = it }, enabled = linked)
+            }
+            Row(Modifier.padding(start = 36.dp)) {
                 if (linked) {
                     OutlinedButton(onClick = {
                         Settings.driveLinked = false; linked = false
@@ -176,6 +172,11 @@ fun SettingsScreen(nav: NavController) {
                 )
             }
             driveMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary) }
+            SwitchRow(
+                "Auto-save",
+                "Saves each document as a PDF to the locations above a few seconds after you scan or edit it, replacing the earlier copy",
+                autoSave,
+            ) { autoSave = it; Settings.autoSave = it }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     "Google Drive needs a one-time setup in Google Cloud for your build (see the README). You'll need these two values:",

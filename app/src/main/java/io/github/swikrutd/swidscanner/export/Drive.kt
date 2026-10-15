@@ -54,8 +54,27 @@ object Drive {
         else -> "Google sign-in failed (code ${e.statusCode})."
     }
 
-    suspend fun upload(token: String, folderName: String, file: File, mime: String) = withContext(Dispatchers.IO) {
+    /**
+     * Uploads [file] into [folderName]. With [replace], a file of the same name that this app
+     * uploaded there before gets the new content instead of a second copy appearing.
+     */
+    suspend fun upload(token: String, folderName: String, file: File, mime: String, replace: Boolean = false) = withContext(Dispatchers.IO) {
         val parent = folderId(token, folderName)
+        if (replace) {
+            val existing = fileId(token, parent, file.name)
+            if (existing != null) {
+                // HttpURLConnection can't send PATCH; Google APIs accept it as an override on POST.
+                val conn = open("https://www.googleapis.com/upload/drive/v3/files/$existing?uploadType=media&fields=id", token).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    setRequestProperty("X-HTTP-Method-Override", "PATCH")
+                    setRequestProperty("Content-Type", mime)
+                    setChunkedStreamingMode(64 * 1024)
+                }
+                conn.outputStream.use { o -> file.inputStream().use { it.copyTo(o) } }
+                return@withContext readJson(conn)
+            }
+        }
         val boundary = "swid" + UUID.randomUUID().toString().replace("-", "")
         val conn = open("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", token).apply {
             requestMethod = "POST"
@@ -71,6 +90,26 @@ object Drive {
             o.write("\r\n--$boundary--\r\n".toByteArray())
         }
         readJson(conn)
+    }
+
+    private fun fileId(token: String, parent: String, name: String): String? {
+        val escaped = name.replace("\\", "\\\\").replace("'", "\\'")
+        val q = "name='$escaped' and '$parent' in parents and trashed=false"
+        val find = open(
+            "https://www.googleapis.com/drive/v3/files?fields=files(id)&spaces=drive&q=" + URLEncoder.encode(q, "UTF-8"),
+            token,
+        )
+        val files = readJson(find).optJSONArray("files")
+        return if (files != null && files.length() > 0) files.getJSONObject(0).getString("id") else null
+    }
+
+    /**
+     * Access token without any UI. Null if Google first needs the user's consent, which only
+     * [DriveAuthorizer] can show.
+     */
+    suspend fun silentToken(ctx: Context): String? {
+        val res = authorize(ctx)
+        return if (res.hasResolution()) null else res.accessToken
     }
 
     private fun folderId(token: String, name: String): String {

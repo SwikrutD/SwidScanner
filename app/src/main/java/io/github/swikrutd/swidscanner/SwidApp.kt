@@ -4,6 +4,7 @@ import android.app.Application
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import io.github.swikrutd.swidscanner.data.DocStore
 import io.github.swikrutd.swidscanner.data.Settings
+import io.github.swikrutd.swidscanner.export.AutoSave
 import org.opencv.android.OpenCVLoader
 
 class SwidApp : Application() {
@@ -13,5 +14,6 @@ class SwidApp : Application() {
         Settings.init(this)
         DocStore.init(this)
         PDFBoxResourceLoader.init(this)
+        AutoSave.start(this)
     }
 }

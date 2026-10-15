@@ -100,6 +100,7 @@ import io.github.swikrutd.swidscanner.core.QuadTracker
 import io.github.swikrutd.swidscanner.data.Corner
 import io.github.swikrutd.swidscanner.data.DocStore
 import io.github.swikrutd.swidscanner.data.Settings
+import io.github.swikrutd.swidscanner.export.AutoSave
 import io.github.swikrutd.swidscanner.imaging.Images
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -224,7 +225,11 @@ private fun CameraContent(nav: NavController, existingDocId: String?, retakePage
     var debugQuad by remember { mutableStateOf<List<Offset>?>(null) }
     var lastMapLog by remember { mutableStateOf(0L) }
     var lastTimingLog by remember { mutableStateOf(0L) }
-    DisposableEffect(Unit) { onDispose { analysis.clearAnalyzer(); executor.shutdown(); dump?.shutdown() } }
+    DisposableEffect(Unit) {
+        // A batch scan is auto-saved once, after the camera closes.
+        AutoSave.scanning = true
+        onDispose { AutoSave.scanning = false; analysis.clearAnalyzer(); executor.shutdown(); dump?.shutdown() }
+    }
 
     fun describe(r: ResolutionInfo?) = r?.let { "${it.resolution} crop=${it.cropRect.toShortString()} rot=${it.rotationDegrees}" } ?: "null"
 

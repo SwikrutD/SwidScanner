@@ -13,7 +13,7 @@ An open-source document scanner for Android. No account, no ads and no cloud pro
 - **Page tools:** rotate, reorder, delete, pinch or double-tap to zoom.
 - **Text recognition (OCR):** extract text from a page or the whole document, edit it, copy or share it. Works offline.
 - **Export:** PDF (Fit image, A4 or Letter; three quality levels; optional searchable text layer; optional password), JPEG images or a .txt file.
-- **Save locations:** a document goes to any folder on the phone or SD card and/or a linked Google Drive folder when you tap Save in its share sheet. Scans themselves stay inside the app. Share to any app at any time.
+- **Save locations:** the Save button writes a document as a PDF to a folder on the phone or SD card, a linked Google Drive folder or both, each with its own on/off switch. Turn on **Auto-save** to save every document a few seconds after you scan or edit it. Scans themselves stay inside the app. Share to any app at any time.
 - **QR and barcode scanner** (QR, Data Matrix, Aztec, PDF417, EAN, UPC, Code 128, Code 39, ITF).
 - Light and dark themes: follow the system or pick one in Settings.
 
@@ -51,6 +51,12 @@ Drive uploads use Google's official sign-in and the `drive.file` permission, so 
 5. In the app, open Settings and tap **Link** next to Google Drive.
 
 Exports then go to a `SwidScanner` folder in your Drive (rename it in Settings). If you build with a different key, add a second Android client with that key's SHA-1.
+
+### Who can link Drive
+
+While the consent screen is in **Testing**, only the Google accounts listed as test users can link Drive (up to 100), and Google asks them to allow access again about once a week. To add someone, open **Google Auth Platform > Audience** (older consoles: **APIs & Services > OAuth consent screen**), click **Add users** under Test users and enter their Gmail address.
+
+To let anyone link Drive, click **Publish app** on the same page so the status becomes **In production**. `drive.file` is a non-sensitive scope, so Google doesn't require an app review for it, and the weekly re-approval stops.
 
 ## How it works
 
