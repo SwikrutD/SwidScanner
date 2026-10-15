@@ -121,7 +121,7 @@ fun SettingsScreen(nav: NavController) {
             HorizontalDivider()
             Section("Save locations")
             Text(
-                "Save sends exports to every location turned on here. Share always works too.",
+                "Scans stay inside the app. To put one in these locations, open the document, tap the share button at the top and choose Save. It writes a PDF (or images) to every location set here.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 

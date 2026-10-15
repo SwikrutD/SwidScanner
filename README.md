@@ -8,18 +8,18 @@ An open-source document scanner for Android. No account, no ads and no cloud pro
 - **Auto-capture or manual.** In Auto mode the shot is taken once the page has been steady for about a second. The shutter button always works too.
 - **Single or batch.** Single takes you straight to corner adjustment after each shot. Batch keeps scanning page after page (it re-arms when you move or turn the page) and you review everything at the end.
 - **Gallery import.** Turn existing photos into scanned pages, with the same automatic crop.
-- **Corner adjustment** with draggable handles and a magnifier, plus Auto (re-detect) and Full (no crop).
+- **Corner adjustment** with draggable handles and a magnifier, plus Auto (re-detect), Full (no crop) and Retake (replace the photo, keeping the page in place).
 - **Five filters:** Original, Magic (flattens shadows and whitens paper), Enhance, Grayscale and B&W. Set a default and apply one to every page.
 - **Page tools:** rotate, reorder, delete, pinch or double-tap to zoom.
 - **Text recognition (OCR):** extract text from a page or the whole document, edit it, copy or share it. Works offline.
 - **Export:** PDF (Fit image, A4 or Letter; three quality levels; optional searchable text layer; optional password), JPEG images or a .txt file.
-- **Save locations:** any folder on the phone or SD card and/or a linked Google Drive folder. Share to any app at any time.
+- **Save locations:** a document goes to any folder on the phone or SD card and/or a linked Google Drive folder when you tap Save in its share sheet. Scans themselves stay inside the app. Share to any app at any time.
 - **QR and barcode scanner** (QR, Data Matrix, Aztec, PDF417, EAN, UPC, Code 128, Code 39, ITF).
-- Light and dark themes follow the system.
+- Light and dark themes: follow the system or pick one in Settings.
 
 ## Install
 
-Copy `SwidScanner-1.0.0.apk` to the phone and open it. Android will ask you to allow installs from that source the first time. Requires Android 8.0 or later.
+Copy `SwidScanner-1.1.0.apk` to the phone and open it. Android will ask you to allow installs from that source the first time. Requires Android 8.0 or later.
 
 ## Build
 
@@ -30,7 +30,7 @@ gradlew.bat assembleRelease      (Windows)
 ./gradlew assembleRelease        (macOS / Linux)
 ```
 
-The APK is written to `app/build/outputs/apk/release/`. Release builds are signed with the key described in `keystore.properties`. Without that file the release build comes out unsigned. `./gradlew assembleDebug` always works and signs with the debug key.
+The APK is written to `app/build/outputs/apk/release/app-release.apk` (the `app/build` folder only exists after a build; `SwidScanner-<version>.apk` in the repo root is a copy of the latest release). Release builds are signed with the key described in `keystore.properties`. Without that file the release build comes out unsigned. `./gradlew assembleDebug` always works and signs with the debug key.
 
 Add `-Pemulator` to include x86_64 libraries for running on an emulator.
 
@@ -47,7 +47,7 @@ Drive uploads use Google's official sign-in and the `drive.file` permission, so 
 3. **APIs & Services > OAuth consent screen:** choose External, fill in the app name and your email, then add your own Gmail address under **Test users**.
 4. **APIs & Services > Credentials > Create credentials > OAuth client ID:** choose **Android**, then enter:
    - Package name: `io.github.swikrutd.swidscanner`
-   - SHA-1: shown in the app under Settings > Save locations (tap to copy). For the provided release key it is `31:E9:06:AE:FE:92:F9:1C:2A:2C:9C:17:54:AE:E9:87:0A:E8:FB:C1`.
+   - SHA-1: shown in the app under Settings > Save locations (tap to copy). It belongs to the key the installed APK was signed with. For the provided release key (`SwidScanner-<version>.apk`, `assembleRelease`) it is `31:E9:06:AE:FE:92:F9:1C:2A:2C:9C:17:54:AE:E9:87:0A:E8:FB:C1`. Debug builds are signed with the debug key of the computer that built them, so they show a different SHA-1.
 5. In the app, open Settings and tap **Link** next to Google Drive.
 
 Exports then go to a `SwidScanner` folder in your Drive (rename it in Settings). If you build with a different key, add a second Android client with that key's SHA-1.

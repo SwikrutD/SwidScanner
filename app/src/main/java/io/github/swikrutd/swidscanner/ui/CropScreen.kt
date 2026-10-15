@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -17,8 +18,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.CameraAlt
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CropFree
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -198,27 +201,33 @@ fun CropScreen(nav: NavController, docId: String, pageId: String, thenDoc: Boole
                     }
                 }
             }
-            Row(
-                Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val compact = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                OutlinedButton(contentPadding = compact, enabled = !saving, onClick = {
-                    nav.popBackStack()
-                    nav.navigate(Routes.retake(docId, pageId, thenDoc))
-                }) { Icon(Icons.Outlined.CameraAlt, null); Text(" Retake") }
-                OutlinedButton(contentPadding = compact, onClick = {
-                    val b = source ?: return@OutlinedButton
-                    scope.launch {
-                        val c = withContext(Dispatchers.Default) { Images.detectCorners(b) }
-                        corners.clear(); corners.addAll(c ?: FULL)
+            // On narrow phones the four buttons don't fit with a "Done" label, so Done becomes a checkmark.
+            BoxWithConstraints(Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp)) {
+                val roomy = maxWidth >= 400.dp
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val compact = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                    OutlinedButton(contentPadding = compact, enabled = !saving, onClick = {
+                        nav.popBackStack()
+                        nav.navigate(Routes.retake(docId, pageId, thenDoc))
+                    }) { Icon(Icons.Outlined.CameraAlt, null); Text(" Retake", maxLines = 1, softWrap = false) }
+                    OutlinedButton(contentPadding = compact, onClick = {
+                        val b = source ?: return@OutlinedButton
+                        scope.launch {
+                            val c = withContext(Dispatchers.Default) { Images.detectCorners(b) }
+                            corners.clear(); corners.addAll(c ?: FULL)
+                        }
+                    }) { Icon(Icons.Outlined.AutoFixHigh, null); Text(" Auto", maxLines = 1, softWrap = false) }
+                    OutlinedButton(contentPadding = compact, onClick = { corners.clear(); corners.addAll(FULL) }) {
+                        Icon(Icons.Outlined.CropFree, null); Text(" Full", maxLines = 1, softWrap = false)
                     }
-                }) { Icon(Icons.Outlined.AutoFixHigh, null); Text(" Auto") }
-                OutlinedButton(contentPadding = compact, onClick = { corners.clear(); corners.addAll(FULL) }) { Icon(Icons.Outlined.CropFree, null); Text(" Full") }
-                Box(Modifier.weight(1f))
-                Button(onClick = { done() }, enabled = !saving && image != null) {
-                    if (saving) CircularProgressIndicator(Modifier.padding(end = 8.dp).size(18.dp), strokeWidth = 2.dp)
-                    Text("Done")
+                    Box(Modifier.weight(1f))
+                    Button(onClick = { done() }, enabled = !saving && image != null, contentPadding = if (roomy) ButtonDefaults.ContentPadding else compact) {
+                        when {
+                            saving -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            roomy -> Text("Done", maxLines = 1, softWrap = false)
+                            else -> Icon(Icons.Outlined.Check, "Done")
+                        }
+                    }
                 }
             }
         }
