@@ -14,7 +14,38 @@ import org.opencv.imgproc.Imgproc
 fun main(args: Array<String>) {
     nu.pattern.OpenCV.loadLocally()
     if (args[0] == "frames") {
-        replay(java.io.File(args[1]), args.getOrNull(2)?.let { java.io.File(it) }, mapOf("raw" to ::rawGray))
+        replay(java.io.File(args[1]), args.getOrNull(2)?.let { java.io.File(it) }, { frames ->
+            val raw = rawGray(frames)
+            val chroma = withChroma(frames)
+            mapOf("gray" to raw, "gray+trk" to tracked(frames, raw), "chroma" to chroma, "chroma+trk" to tracked(frames, chroma))
+        })
+        return
+    }
+    if (args[0] == "cands") {
+        // cands <frame dir> <frame name>: prints every candidate quad and its per-side edge support.
+        val f = loadFrames(java.io.File(args[1])).first { it.name == args[2] }
+        DocProcessing.debugCandidate = { q, sides, border ->
+            println("  ${q.map { "(${it.x.toInt()},${it.y.toInt()})" }} sides=${sides.map { "%.2f".format(it) }} border=$border")
+        }
+        DocProcessing.debugSupport = { Imgcodecs.imwrite("support.png", it) }
+        val g = f.gray()
+        println("gray -> ${DocProcessing.detect(g, live = true)?.map { "(${it.x.toInt()},${it.y.toInt()})" }}")
+        println("chroma -> ${withChroma(listOf(f))[0]?.map { "(${it.x.toInt()},${it.y.toInt()})" }}")
+        return
+    }
+    if (args[0] == "grid") {
+        // grid <image> <out> [x,y x,y x,y x,y]: overlays a 20 px grid (labels every 100) and an optional quad, for hand labelling truth.
+        val img = Imgcodecs.imread(args[1])
+        for (x in 0 until img.cols() step 20) Imgproc.line(img, org.opencv.core.Point(x.toDouble(), 0.0), org.opencv.core.Point(x.toDouble(), img.rows().toDouble()), if (x % 100 == 0) Scalar(0.0, 255.0, 255.0) else Scalar(90.0, 90.0, 90.0), 1)
+        for (y in 0 until img.rows() step 20) Imgproc.line(img, org.opencv.core.Point(0.0, y.toDouble()), org.opencv.core.Point(img.cols().toDouble(), y.toDouble()), if (y % 100 == 0) Scalar(0.0, 255.0, 255.0) else Scalar(90.0, 90.0, 90.0), 1)
+        for (x in 0 until img.cols() step 100) for (y in 0 until img.rows() step 100)
+            Imgproc.putText(img, "$x,$y", org.opencv.core.Point(x + 2.0, y + 12.0), 0, 0.35, Scalar(0.0, 255.0, 255.0), 1)
+        if (args.size >= 7) {
+            val q = args.toList().subList(3, 7).map { s: String -> s.split(",").let { org.opencv.core.Point(it[0].toDouble(), it[1].toDouble()) } }
+            for (i in 0 until 4) Imgproc.line(img, q[i], q[(i + 1) % 4], Scalar(255.0, 0.0, 255.0), 1)
+        }
+        val big = Mat(); Imgproc.resize(img, big, Size(), 2.0, 2.0, Imgproc.INTER_NEAREST)
+        Imgcodecs.imwrite(args[2], big)
         return
     }
     val inDir = java.io.File(args[0]); val outDir = java.io.File(args[1]); outDir.mkdirs()

@@ -95,6 +95,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavController
 import io.github.swikrutd.swidscanner.BuildConfig
 import io.github.swikrutd.swidscanner.core.DocProcessing
+import io.github.swikrutd.swidscanner.core.QuadTracker
 import io.github.swikrutd.swidscanner.data.Corner
 import io.github.swikrutd.swidscanner.data.DocStore
 import io.github.swikrutd.swidscanner.data.Settings
@@ -113,6 +114,7 @@ import org.opencv.core.Mat
 import org.opencv.core.Point
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -159,8 +161,8 @@ private class AutoState {
     var lastShot = 0L
 }
 
-/** One analysed frame: the quad normalised to the upright frame plus what the debug overlay needs. */
-private class FrameResult(val quad: List<Offset>?, val w: Float, val h: Float, val source: OutputTransform?)
+/** One analysed frame: the steadied quad to show and the raw detection, normalised to the upright frame, plus what the debug overlay needs. */
+private class FrameResult(val quad: List<Offset>?, val raw: List<Offset>?, val w: Float, val h: Float, val source: OutputTransform?)
 
 @Composable
 private fun CameraContent(nav: NavController, existingDocId: String?) {
@@ -207,6 +209,9 @@ private fun CameraContent(nav: NavController, existingDocId: String?) {
     }
     val preview = remember { Preview.Builder().setResolutionSelector(ratio43).build() }
     val executor = remember { Executors.newSingleThreadExecutor() }
+    val tracker = remember { QuadTracker() }
+    val analysisMs = remember { AtomicLong() }
+    val analysisFrames = remember { AtomicLong() }
     val dump = remember { if (BuildConfig.DEBUG) FrameDump(File(ctx.filesDir, "frames")) else null }
     var dumping by remember { mutableStateOf(false) }
     var dumpSaved by remember { mutableIntStateOf(0) }
@@ -238,11 +243,12 @@ private fun CameraContent(nav: NavController, existingDocId: String?) {
             return List(4) { Offset(a[2 * it], a[2 * it + 1]) }
         }
         debugFrame = map(listOf(Offset(0f, 0f), Offset(r.w, 0f), Offset(r.w, r.h), Offset(0f, r.h)))
-        debugQuad = r.quad?.let { q -> map(q.map { Offset(it.x * r.w, it.y * r.h) }) }
+        debugQuad = r.raw?.let { q -> map(q.map { Offset(it.x * r.w, it.y * r.h) }) }
         val now = SystemClock.uptimeMillis()
         if (now - lastMapLog > 3000) {
             lastMapLog = now
-            Log.i(TAG, "camera ${cameraInfo()}")
+            val n = analysisFrames.getAndSet(0)
+            Log.i(TAG, "camera ${cameraInfo()} analysis ${if (n > 0) analysisMs.getAndSet(0) / n else 0} ms/frame, $n frames")
         }
     }
 
@@ -333,7 +339,9 @@ private fun CameraContent(nav: NavController, existingDocId: String?) {
 
     LaunchedEffect(Unit) {
         analysis.setAnalyzer(executor) { image ->
-            val r = try { analyzeFrame(image, dump) } catch (_: Throwable) { FrameResult(null, 0f, 0f, null) } finally { image.close() }
+            val t0 = SystemClock.uptimeMillis()
+            val r = try { analyzeFrame(image, tracker, dump) } catch (_: Throwable) { FrameResult(null, null, 0f, 0f, null) } finally { image.close() }
+            analysisMs.addAndGet(SystemClock.uptimeMillis() - t0); analysisFrames.incrementAndGet()
             ContextCompat.getMainExecutor(ctx).execute {
                 onFrame(r.quad)
                 if (BuildConfig.DEBUG) debugMap(r)
@@ -403,7 +411,8 @@ private fun CameraContent(nav: NavController, existingDocId: String?) {
                 Box(Modifier.aspectRatio(3f / 4f)) {
                     AndroidView({ previewView }, Modifier.fillMaxSize())
                     Canvas(Modifier.fillMaxSize()) {
-                        // Debug: where CameraX says the analysis frame and quad sit in the view.
+                        // Debug: where CameraX says the analysis frame sits in the view, and the raw
+                        // (unsteadied) detection.
                         fun outline(p: List<Offset>, c: Color) = drawPath(
                             Path().apply { moveTo(p[0].x, p[0].y); for (i in 1 until 4) lineTo(p[i].x, p[i].y); close() },
                             c, style = Stroke(width = 1.5.dp.toPx()),
@@ -508,24 +517,54 @@ private fun Shutter(progress: Float, busy: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** Runs page detection on the luminance plane of a preview frame. The quad is normalised to the upright frame. */
-private fun analyzeFrame(image: ImageProxy, dump: FrameDump?): FrameResult {
-    val plane = image.planes[0]
-    val w = image.width; val h = image.height; val rs = plane.rowStride
-    val buf = plane.buffer
-    val bytes = ByteArray(w * h)
-    if (rs == w) buf.get(bytes, 0, w * h) else for (y in 0 until h) { buf.position(y * rs); buf.get(bytes, y * w, w) }
-    val m = Mat(h, w, CvType.CV_8UC1)
-    m.put(0, 0, bytes)
-    val up = DocProcessing.rotate(m, image.imageInfo.rotationDegrees)
-    m.release()
-    val q: List<Point>? = DocProcessing.detect(up)
-    val uw = up.cols().toFloat(); val uh = up.rows().toFloat()
+/**
+ * Runs live page detection on a preview frame and steadies the result with [tracker].
+ * Quads are normalised to the upright frame.
+ */
+private fun analyzeFrame(image: ImageProxy, tracker: QuadTracker, dump: FrameDump?): FrameResult {
+    val rotation = image.imageInfo.rotationDegrees
+    val luma = planeMat(image.planes[0], image.width, image.height)
+    val up = DocProcessing.rotate(luma, rotation)
+    luma.release()
+    val chroma = if (image.planes.size >= 3) {
+        val u = planeMat(image.planes[1], image.width / 2, image.height / 2)
+        val v = planeMat(image.planes[2], image.width / 2, image.height / 2)
+        val c = DocProcessing.chromaFromUV(u, v)
+        u.release(); v.release()
+        DocProcessing.rotate(c, rotation).also { c.release() }
+    } else null
+    val raw: List<Point>? = DocProcessing.detect(up, chroma, live = true)
+    chroma?.release()
+    val uw = up.cols(); val uh = up.rows()
+    val shown = tracker.update(raw, uw, uh, image.imageInfo.timestamp / 1_000_000)
     var source: OutputTransform? = null
     if (BuildConfig.DEBUG) {
         source = ImageProxyTransformFactory().apply { isUsingRotationDegrees = true }.getOutputTransform(image)
-        dump?.save(image, up, q)
+        dump?.save(image, up, raw)
     }
     up.release()
-    return FrameResult(q?.map { Offset((it.x / uw).toFloat(), (it.y / uh).toFloat()) }, uw, uh, source)
+    fun norm(q: List<Point>?) = q?.map { Offset((it.x / uw).toFloat(), (it.y / uh).toFloat()) }
+    return FrameResult(norm(shown), norm(raw), uw.toFloat(), uh.toFloat(), source)
+}
+
+/** Copies one plane of a YUV_420_888 image into a tightly packed 8-bit Mat, whatever its row and pixel stride. */
+private fun planeMat(plane: ImageProxy.PlaneProxy, w: Int, h: Int): Mat {
+    val buf = plane.buffer
+    val rs = plane.rowStride; val ps = plane.pixelStride
+    val bytes = ByteArray(w * h)
+    if (ps == 1 && rs == w) {
+        buf.position(0); buf.get(bytes, 0, w * h)
+    } else if (ps == 1) {
+        for (y in 0 until h) { buf.position(y * rs); buf.get(bytes, y * w, w) }
+    } else {
+        val row = ByteArray(rs)
+        for (y in 0 until h) {
+            buf.position(y * rs)
+            buf.get(row, 0, minOf(rs, buf.remaining()))
+            for (x in 0 until w) bytes[y * w + x] = row[x * ps]
+        }
+    }
+    val m = Mat(h, w, CvType.CV_8UC1)
+    m.put(0, 0, bytes)
+    return m
 }
