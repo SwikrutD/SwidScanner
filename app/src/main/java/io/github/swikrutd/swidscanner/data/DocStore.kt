@@ -4,7 +4,9 @@ import android.content.Context
 import android.graphics.Bitmap
 import io.github.swikrutd.swidscanner.core.Filter
 import io.github.swikrutd.swidscanner.imaging.Images
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -76,6 +78,9 @@ object DocStore {
     /** Page ids currently being re-rendered. */
     private val _busy = MutableStateFlow<Set<String>>(emptySet())
     val busy: StateFlow<Set<String>> = _busy
+
+    /** Runs edits that must finish even when the screen that started them closes. */
+    val work = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val meta = Mutex()
     // Rendering full-size pages is memory heavy, so do one at a time.
@@ -239,7 +244,7 @@ object DocStore {
         _docs.update { list -> (list.filter { it.id != d.id } + d).sortedByDescending { it.updated } }
     }
 
-    private fun newId() = UUID.randomUUID().toString().replace("-", "").take(16)
+    fun newId() = UUID.randomUUID().toString().replace("-", "").take(16)
 
     // ---- JSON ----
 

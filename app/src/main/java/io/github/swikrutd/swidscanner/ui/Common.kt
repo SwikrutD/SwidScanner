@@ -76,4 +76,11 @@ object Routes {
     fun doc(docId: String) = "doc/$docId"
     fun page(docId: String, pageId: String) = "page/$docId/$pageId"
     fun ocr(docId: String, pageId: String = "all") = "ocr/$docId/$pageId"
+    const val PLACE = "place/{docId}/{pageId}?asset={asset}&overlay={overlay}"
+    /** Signature and stamp placement on a page: [asset] adds a new placement, [overlay] selects an existing one. */
+    fun place(docId: String, pageId: String, asset: String? = null, overlay: String? = null) = buildString {
+        append("place/$docId/$pageId")
+        val q = listOfNotNull(asset?.let { "asset=$it" }, overlay?.let { "overlay=$it" })
+        if (q.isNotEmpty()) append(q.joinToString("&", prefix = "?"))
+    }
 }

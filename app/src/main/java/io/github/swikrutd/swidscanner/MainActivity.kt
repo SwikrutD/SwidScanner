@@ -30,6 +30,7 @@ import io.github.swikrutd.swidscanner.ui.DocScreen
 import io.github.swikrutd.swidscanner.ui.HomeScreen
 import io.github.swikrutd.swidscanner.ui.OcrScreen
 import io.github.swikrutd.swidscanner.ui.PageScreen
+import io.github.swikrutd.swidscanner.ui.PlaceOverlayScreen
 import io.github.swikrutd.swidscanner.ui.QrScreen
 import io.github.swikrutd.swidscanner.ui.Routes
 import io.github.swikrutd.swidscanner.ui.SettingsScreen
@@ -123,6 +124,16 @@ private fun AppNav(route: String?, onRouted: () -> Unit) {
         }
         composable("ocr/{docId}/{pageId}") {
             OcrScreen(nav, it.arguments!!.getString("docId")!!, it.arguments!!.getString("pageId")!!)
+        }
+        composable(
+            Routes.PLACE,
+            arguments = listOf(
+                navArgument("asset") { type = NavType.StringType; nullable = true; defaultValue = null },
+                navArgument("overlay") { type = NavType.StringType; nullable = true; defaultValue = null },
+            ),
+        ) {
+            val a = it.arguments!!
+            PlaceOverlayScreen(nav, a.getString("docId")!!, a.getString("pageId")!!, a.getString("asset"), a.getString("overlay"))
         }
         composable(Routes.QR) { QrScreen(nav) }
         composable(Routes.SETTINGS) { SettingsScreen(nav) }
