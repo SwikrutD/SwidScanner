@@ -21,6 +21,11 @@ fun main(args: Array<String>) {
         })
         return
     }
+    if (args[0] == "ink") {
+        // ink <image|synth> <out>: transparent background for a signature or stamp photo (see Ink.kt).
+        ink(args[1], java.io.File(args[2]))
+        return
+    }
     if (args[0] == "cands") {
         // cands <frame dir> <frame name>: prints every candidate quad and its per-side edge support.
         val f = loadFrames(java.io.File(args[1])).first { it.name == args[2] }

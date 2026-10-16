@@ -23,6 +23,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import io.github.swikrutd.swidscanner.data.Settings
 import io.github.swikrutd.swidscanner.data.ThemeMode
+import io.github.swikrutd.swidscanner.data.AssetKind
 import io.github.swikrutd.swidscanner.ui.CameraScreen
 import io.github.swikrutd.swidscanner.ui.CropScreen
 import io.github.swikrutd.swidscanner.ui.DocScreen
@@ -32,6 +33,10 @@ import io.github.swikrutd.swidscanner.ui.PageScreen
 import io.github.swikrutd.swidscanner.ui.QrScreen
 import io.github.swikrutd.swidscanner.ui.Routes
 import io.github.swikrutd.swidscanner.ui.SettingsScreen
+import io.github.swikrutd.swidscanner.ui.SignatureDrawScreen
+import io.github.swikrutd.swidscanner.ui.AssetImportScreen
+import io.github.swikrutd.swidscanner.ui.AssetLibraryScreen
+import io.github.swikrutd.swidscanner.ui.StampTextScreen
 import io.github.swikrutd.swidscanner.ui.SwidTheme
 
 class MainActivity : ComponentActivity() {
@@ -94,15 +99,16 @@ private fun AppNav(route: String?, onRouted: () -> Unit) {
     NavHost(navController = nav, startDestination = Routes.HOME) {
         composable(Routes.HOME) { HomeScreen(nav) }
         composable(
-            "camera?docId={docId}&retake={retake}&thenDoc={thenDoc}",
+            "camera?docId={docId}&retake={retake}&thenDoc={thenDoc}&asset={asset}",
             arguments = listOf(
                 navArgument("docId") { type = NavType.StringType; nullable = true; defaultValue = null },
                 navArgument("retake") { type = NavType.StringType; nullable = true; defaultValue = null },
                 navArgument("thenDoc") { type = NavType.BoolType; defaultValue = false },
+                navArgument("asset") { type = NavType.StringType; nullable = true; defaultValue = null },
             ),
         ) {
             val a = it.arguments
-            CameraScreen(nav, a?.getString("docId"), a?.getString("retake"), a?.getBoolean("thenDoc") ?: false)
+            CameraScreen(nav, a?.getString("docId"), a?.getString("retake"), a?.getBoolean("thenDoc") ?: false, assetKindArg(a?.getString("asset")))
         }
         composable(
             "crop/{docId}/{pageId}?thenDoc={thenDoc}",
@@ -120,5 +126,16 @@ private fun AppNav(route: String?, onRouted: () -> Unit) {
         }
         composable(Routes.QR) { QrScreen(nav) }
         composable(Routes.SETTINGS) { SettingsScreen(nav) }
+        composable(Routes.LIBRARY) { e -> assetKindArg(e.arguments?.getString("kind"))?.let { AssetLibraryScreen(nav, it) } }
+        composable(Routes.SIGNATURE_DRAW) { SignatureDrawScreen(nav) }
+        composable(Routes.STAMP_TEXT) { StampTextScreen(nav) }
+        composable(
+            Routes.ASSET_IMPORT,
+            arguments = listOf(navArgument("window") { type = NavType.BoolType; defaultValue = false }),
+        ) { e ->
+            assetKindArg(e.arguments?.getString("kind"))?.let { AssetImportScreen(nav, it, e.arguments?.getBoolean("window") ?: false) }
+        }
     }
 }
+
+private fun assetKindArg(name: String?): AssetKind? = AssetKind.entries.firstOrNull { it.name == name }

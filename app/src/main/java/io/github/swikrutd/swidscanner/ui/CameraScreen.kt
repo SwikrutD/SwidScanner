@@ -103,6 +103,7 @@ import io.github.swikrutd.swidscanner.data.Corner
 import io.github.swikrutd.swidscanner.data.DocStore
 import io.github.swikrutd.swidscanner.data.Settings
 import io.github.swikrutd.swidscanner.export.AutoSave
+import io.github.swikrutd.swidscanner.data.AssetKind
 import io.github.swikrutd.swidscanner.imaging.Images
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -128,8 +129,13 @@ private val DebugCyan = Color(0xFF3FD0FF)
 private const val TAG = "SwidCam"
 
 @Composable
-fun CameraScreen(nav: NavController, existingDocId: String?, retakePageId: String? = null, retakeThenDoc: Boolean = false) {
-    RequireCamera(nav) { CameraContent(nav, existingDocId, retakePageId, retakeThenDoc) }
+fun CameraScreen(
+    nav: NavController, existingDocId: String?, retakePageId: String? = null, retakeThenDoc: Boolean = false,
+    assetKind: AssetKind? = null,
+) {
+    RequireCamera(nav) {
+        if (assetKind != null) AssetShot(nav, assetKind) else CameraContent(nav, existingDocId, retakePageId, retakeThenDoc)
+    }
 }
 
 /** Shows [content] once camera permission is granted, asking for it first. */
@@ -564,7 +570,7 @@ private fun ModeToggle(on: String, off: String, value: Boolean, onChange: (Boole
 }
 
 @Composable
-private fun Shutter(progress: Float, busy: Boolean, onClick: () -> Unit) {
+internal fun Shutter(progress: Float, busy: Boolean, onClick: () -> Unit) {
     Box(Modifier.size(78.dp).clickable(enabled = !busy, onClick = onClick), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             drawCircle(Color.White, style = Stroke(4.dp.toPx()))

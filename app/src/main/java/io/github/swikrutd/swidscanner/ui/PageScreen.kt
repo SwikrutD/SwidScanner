@@ -184,7 +184,7 @@ private fun FilterStrip(docId: String, page: Page) {
     LaunchedEffect(page.id, page.corners, page.rotation) {
         previews = withContext(Dispatchers.Default) {
             val small = Images.decodeFile(DocStore.origFile(docId, page.id), 420)
-            val out = Filter.entries.associateWith { f -> Images.renderPage(small, page.copy(filter = f)).asImageBitmap() }
+            val out = Filter.entries.associateWith { f -> Images.renderPage(small, page.copy(filter = f, overlays = emptyList())).asImageBitmap() }
             small.recycle()
             out
         }

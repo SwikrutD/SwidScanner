@@ -31,6 +31,28 @@ data class Page(
     val rotation: Int,
     /** Bumped on every edit; part of the rendered file name so image caches refresh. */
     val rev: Int,
+    /** Signatures and stamps drawn on top of the rendered page, in order. */
+    val overlays: List<Overlay> = emptyList(),
+)
+
+/**
+ * A signature or stamp placed on a page. Position and size are normalised to 0..1 of the
+ * rendered page (after crop and rotation), so the result is the same at any resolution.
+ */
+data class Overlay(
+    val id: String,
+    val assetId: String,
+    val type: AssetKind,
+    /** Centre of the overlay. */
+    val cx: Float,
+    val cy: Float,
+    /** Width as a share of the page width. The height follows the asset's aspect ratio. */
+    val width: Float,
+    /** Clockwise degrees around the centre. */
+    val rotation: Float = 0f,
+    val opacity: Float = 1f,
+    /** Colour that replaces the ink while keeping its alpha, or null to draw the asset as stored. */
+    val tint: Int? = null,
 )
 
 data class Doc(
@@ -150,6 +172,14 @@ object DocStore {
             }
         }
 
+    /** Replaces the page's overlays and re-renders it from the original capture. */
+    suspend fun setOverlays(docId: String, pageId: String, overlays: List<Overlay>) =
+        updatePage(docId, pageId) { it.copy(overlays = overlays) }
+
+    /** True when any page of any document uses [assetId]. */
+    fun usesAsset(assetId: String): Boolean =
+        _docs.value.any { d -> d.pages.any { p -> p.overlays.any { it.assetId == assetId } } }
+
     suspend fun setFilterForAll(docId: String, filter: Filter) {
         get(docId)?.pages?.filter { it.filter != filter }?.forEach { p ->
             updatePage(docId, p.id) { it.copy(filter = filter) }
@@ -224,6 +254,7 @@ object DocStore {
                 p.corners?.let { c ->
                     put("corners", JSONArray().apply { c.forEach { put(it.x.toDouble()); put(it.y.toDouble()) } })
                 }
+                if (p.overlays.isNotEmpty()) put("overlays", JSONArray().apply { p.overlays.forEach { put(overlayJson(it)) } })
             })
         }
         val json = JSONObject().apply {
@@ -248,8 +279,34 @@ object DocStore {
                 filter = runCatching { Filter.valueOf(o.getString("filter")) }.getOrDefault(Filter.ORIGINAL),
                 rotation = o.optInt("rotation"),
                 rev = o.optInt("rev"),
+                overlays = o.optJSONArray("overlays")?.let { a -> (0 until a.length()).mapNotNull { k -> readOverlay(a.optJSONObject(k)) } }
+                    ?: emptyList(),
             )
         }
         Doc(j.getString("id"), j.getString("name"), j.getLong("created"), j.getLong("updated"), pages)
     }.getOrNull()
+
+    private fun overlayJson(o: Overlay) = JSONObject().apply {
+        put("id", o.id); put("asset", o.assetId); put("type", o.type.name)
+        put("cx", o.cx.toDouble()); put("cy", o.cy.toDouble()); put("width", o.width.toDouble())
+        put("rotation", o.rotation.toDouble()); put("opacity", o.opacity.toDouble())
+        o.tint?.let { put("tint", it) }
+    }
+
+    /** A damaged overlay is dropped on its own so the rest of the document still loads. */
+    private fun readOverlay(o: JSONObject?): Overlay? = o?.let {
+        runCatching {
+            Overlay(
+                id = o.getString("id"),
+                assetId = o.getString("asset"),
+                type = AssetKind.valueOf(o.getString("type")),
+                cx = o.getDouble("cx").toFloat(),
+                cy = o.getDouble("cy").toFloat(),
+                width = o.getDouble("width").toFloat(),
+                rotation = o.optDouble("rotation", 0.0).toFloat(),
+                opacity = o.optDouble("opacity", 1.0).toFloat(),
+                tint = if (o.has("tint") && !o.isNull("tint")) o.getInt("tint") else null,
+            )
+        }.getOrNull()
+    }
 }

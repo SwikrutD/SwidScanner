@@ -2,6 +2,7 @@ package io.github.swikrutd.swidscanner.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,6 +21,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.TextFields
+import androidx.compose.material.icons.outlined.Draw
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,6 +53,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import io.github.swikrutd.swidscanner.data.AssetKind
 import io.github.swikrutd.swidscanner.BuildConfigInfo
 import io.github.swikrutd.swidscanner.core.Filter
 import io.github.swikrutd.swidscanner.data.PageSize
@@ -190,6 +194,23 @@ fun SettingsScreen(nav: NavController) {
                 )
                 CopyRow("Package", ctx.packageName) { clipboard.setText(AnnotatedString(it)) }
                 CopyRow("SHA-1", Drive.signingSha1(ctx)) { clipboard.setText(AnnotatedString(it)) }
+            }
+
+            HorizontalDivider()
+            Section("Signatures and stamps")
+            Row(Modifier.fillMaxWidth().clickable { nav.navigate(Routes.library(AssetKind.SIGNATURE)) }, verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Draw, null, tint = MaterialTheme.colorScheme.primary)
+                Column(Modifier.weight(1f).padding(start = 12.dp, top = 6.dp, bottom = 6.dp)) {
+                    Text("Manage signatures")
+                    Text("Draw, scan or import a signature", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Row(Modifier.fillMaxWidth().clickable { nav.navigate(Routes.library(AssetKind.STAMP)) }, verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.TextFields, null, tint = MaterialTheme.colorScheme.primary)
+                Column(Modifier.weight(1f).padding(start = 12.dp, top = 6.dp, bottom = 6.dp)) {
+                    Text("Manage stamps")
+                    Text("Make a text stamp, scan one or import a file", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
 
             HorizontalDivider()

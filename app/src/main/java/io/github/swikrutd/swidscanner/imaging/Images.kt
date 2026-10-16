@@ -3,11 +3,17 @@ package io.github.swikrutd.swidscanner.imaging
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
 import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
 import io.github.swikrutd.swidscanner.core.DocProcessing
+import io.github.swikrutd.swidscanner.data.AssetStore
 import io.github.swikrutd.swidscanner.data.Corner
+import io.github.swikrutd.swidscanner.data.Overlay
 import io.github.swikrutd.swidscanner.data.Page
 import org.opencv.android.Utils
 import org.opencv.core.Mat
@@ -131,7 +137,7 @@ object Images {
 
     private fun scaleFor(b: Bitmap) = minOf(1f, 1000f / max(b.width, b.height))
 
-    /** Crop, rotate and filter a capture into the final page image. */
+    /** Crop, rotate and filter a capture into the final page image, then draw its overlays. */
     fun renderPage(orig: Bitmap, page: Page): Bitmap {
         val src = toMat(orig)
         val warped = page.corners?.let { c ->
@@ -143,6 +149,37 @@ object Images {
         warped.release()
         val filtered = DocProcessing.applyFilter(rotated, page.filter)
         rotated.release()
-        return toBitmap(filtered).also { filtered.release() }
+        val out = toBitmap(filtered).also { filtered.release() }
+        drawOverlays(out, page.overlays)
+        return out
+    }
+
+    /**
+     * Draws [overlays] onto [page] (mutable) in list order. An overlay whose asset file is
+     * missing is skipped rather than failing the whole render.
+     */
+    private fun drawOverlays(page: Bitmap, overlays: List<Overlay>) {
+        if (overlays.isEmpty()) return
+        val canvas = Canvas(page)
+        val cache = HashMap<String, Bitmap?>()
+        for (o in overlays) {
+            val asset = cache.getOrPut(o.assetId) {
+                AssetStore.file(o.assetId)?.let { f -> BitmapFactory.decodeFile(f.path) }
+            } ?: continue
+            val scale = o.width * page.width / asset.width
+            val m = Matrix().apply {
+                postTranslate(-asset.width / 2f, -asset.height / 2f)
+                postScale(scale, scale)
+                postRotate(o.rotation)
+                postTranslate(o.cx * page.width, o.cy * page.height)
+            }
+            val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG).apply {
+                alpha = (o.opacity.coerceIn(0f, 1f) * 255).roundToInt()
+                // SRC_IN keeps the asset's alpha and replaces its colour.
+                o.tint?.let { colorFilter = PorterDuffColorFilter(it or 0xFF000000.toInt(), PorterDuff.Mode.SRC_IN) }
+            }
+            canvas.drawBitmap(asset, m, paint)
+        }
+        cache.values.forEach { it?.recycle() }
     }
 }

@@ -2,6 +2,7 @@ package io.github.swikrutd.swidscanner
 
 import android.app.Application
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import io.github.swikrutd.swidscanner.data.AssetStore
 import io.github.swikrutd.swidscanner.data.DocStore
 import io.github.swikrutd.swidscanner.data.Settings
 import androidx.core.content.pm.ShortcutInfoCompat
@@ -17,6 +18,7 @@ class SwidApp : Application() {
         check(OpenCVLoader.initLocal()) { "OpenCV failed to load" }
         Settings.init(this)
         DocStore.init(this)
+        AssetStore.init(this)
         PDFBoxResourceLoader.init(this)
         AutoSave.start(this)
         AutoName.start(this)

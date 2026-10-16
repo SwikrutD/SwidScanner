@@ -5,3 +5,7 @@ local.properties
 keystore.properties
 *.jks
 .idea/
+_to_delete/
+/SwidScanner-*.apk
+references/*.apk
+references/OkenScan/

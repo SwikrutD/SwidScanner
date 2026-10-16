@@ -937,6 +937,142 @@ object DocProcessing {
         return out
     }
 
+    /** Ink strength below this never counts as ink, so a blank crop does not turn paper grain into ink. */
+    private const val MIN_INK = 40.0
+    /** Specks smaller than this share of the image area are dropped. */
+    private const val SPECK_SHARE = 1.5e-5
+
+    /**
+     * Turns a photo of ink on paper (a signature or a stamp) into an RGBA image with a
+     * transparent background, cropped to the ink with a small margin.
+     *
+     * [src] is 8-bit gray, RGB or RGBA (RGB order matters here, unlike the filters).
+     * [inkColor] is 0xAARRGGBB with the alpha ignored: every ink pixel gets that colour.
+     * Null keeps the ink's own colours with the lighting taken out, for stamps.
+     * Returns a 1x1 transparent Mat if no ink is found.
+     */
+    fun inkToTransparent(src: Mat, inkColor: Int?): Mat {
+        val color = toColor3(src)
+        val planes = ArrayList<Mat>()
+        Core.split(color, planes)
+        color.release()
+        // Paper becomes 255 in every channel, under a shadow too.
+        val flat = planes.map { p -> flattenPaper(p).also { p.release() } }
+        // Ink strength: how far the darkest channel falls below paper, so red and blue ink count as much as black.
+        val strength = Mat()
+        Core.min(flat[0], flat[1], strength)
+        Core.min(strength, flat[2], strength)
+        Core.bitwise_not(strength, strength)
+
+        val mask = Mat()
+        val otsuT = Imgproc.threshold(strength, mask, 0.0, 255.0, Imgproc.THRESH_BINARY or Imgproc.THRESH_OTSU)
+        val t = max(otsuT, MIN_INK)
+        if (t > otsuT) Imgproc.threshold(strength, mask, t, 255.0, Imgproc.THRESH_BINARY)
+        val w = src.cols(); val h = src.rows()
+        removeSpecks(mask, max(6.0, w.toDouble() * h * SPECK_SHARE))
+        // Let the soft edge reach one pixel past the mask so strokes keep their anti-aliasing.
+        val near = Mat()
+        Imgproc.dilate(mask, near, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0)))
+
+        val n = w * h
+        val s = ByteArray(n).also { strength.get(0, 0, it) }
+        val m = ByteArray(n).also { mask.get(0, 0, it) }
+        val nb = ByteArray(n).also { near.get(0, 0, it) }
+        strength.release(); mask.release(); near.release()
+
+        // Soft alpha: transparent at half the threshold, opaque at the median ink strength.
+        val hist = IntArray(256)
+        for (i in 0 until n) if (m[i].toInt() != 0) hist[s[i].toInt() and 0xFF]++
+        val inkCount = hist.sum()
+        if (inkCount == 0) {
+            flat.forEach { it.release() }
+            return Mat(1, 1, CvType.CV_8UC4, org.opencv.core.Scalar(0.0, 0.0, 0.0, 0.0))
+        }
+        var median = 0; var acc = 0
+        while (acc + hist[median] < inkCount / 2) { acc += hist[median]; median++ }
+        val lo = t / 2
+        val hi = max(median.toDouble(), t + 20)
+        val alpha = ByteArray(n)
+        var x0 = w; var y0 = h; var x1 = -1; var y1 = -1
+        for (i in 0 until n) {
+            if (nb[i].toInt() == 0) continue
+            val a = (((s[i].toInt() and 0xFF) - lo) / (hi - lo)).coerceIn(0.0, 1.0)
+            if (a <= 0.0) continue
+            alpha[i] = (a * 255).roundToInt().toByte()
+            val x = i % w; val y = i / w
+            if (x < x0) x0 = x; if (x > x1) x1 = x
+            if (y < y0) y0 = y; if (y > y1) y1 = y
+        }
+
+        val rgb = Array(3) { ByteArray(n) }
+        if (inkColor != null) {
+            val c = intArrayOf((inkColor shr 16) and 0xFF, (inkColor shr 8) and 0xFF, inkColor and 0xFF)
+            for (k in 0 until 3) java.util.Arrays.fill(rgb[k], c[k].toByte())
+        } else {
+            // A soft edge pixel is ink blended with white paper; undo that blend so edges keep the ink's colour.
+            for (k in 0 until 3) {
+                val f = ByteArray(n).also { flat[k].get(0, 0, it) }
+                for (i in 0 until n) {
+                    val a = (alpha[i].toInt() and 0xFF) / 255.0
+                    if (a <= 0.0) continue
+                    val aa = max(a, 0.3)
+                    rgb[k][i] = (((f[i].toInt() and 0xFF) - 255 * (1 - aa)) / aa).coerceIn(0.0, 255.0).roundToInt().toByte()
+                }
+            }
+        }
+        flat.forEach { it.release() }
+
+        val out4 = rgb.map { b -> Mat(h, w, CvType.CV_8UC1).also { it.put(0, 0, b) } } +
+            Mat(h, w, CvType.CV_8UC1).also { it.put(0, 0, alpha) }
+        val full = Mat()
+        Core.merge(out4, full)
+        out4.forEach { it.release() }
+        val margin = max(4, (max(x1 - x0, y1 - y0) * 0.02).roundToInt())
+        val rect = org.opencv.core.Rect(
+            max(0, x0 - margin), max(0, y0 - margin),
+            min(w, x1 + margin + 1) - max(0, x0 - margin), min(h, y1 + margin + 1) - max(0, y0 - margin),
+        )
+        val out = Mat(full, rect).clone()
+        full.release()
+        return out
+    }
+
+    /**
+     * Divides out the paper colour of one 8-bit plane. The paper is estimated with a
+     * morphological close (which removes ink thinner than the kernel but keeps shadow edges
+     * where they are) at low resolution.
+     */
+    private fun flattenPaper(plane: Mat): Mat {
+        val f = min(1.0, 600.0 / max(plane.cols(), plane.rows()))
+        val small = Mat()
+        Imgproc.resize(plane, small, Size(), f, f, Imgproc.INTER_AREA)
+        val k = (max(small.cols(), small.rows()) / 25 or 1).coerceAtLeast(5).toDouble()
+        val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(k, k))
+        Imgproc.morphologyEx(small, small, Imgproc.MORPH_CLOSE, kernel)
+        Imgproc.medianBlur(small, small, 5)
+        val bg = Mat()
+        Imgproc.resize(small, bg, plane.size(), 0.0, 0.0, Imgproc.INTER_LINEAR)
+        val out = Mat()
+        Core.divide(plane, bg, out, 255.0)
+        small.release(); bg.release(); kernel.release()
+        return out
+    }
+
+    /** Clears connected blobs of [mask] (8-bit, 0 or 255) smaller than [minArea] pixels. */
+    private fun removeSpecks(mask: Mat, minArea: Double) {
+        val labels = Mat(); val stats = Mat(); val centroids = Mat()
+        val count = Imgproc.connectedComponentsWithStats(mask, labels, stats, centroids, 8, CvType.CV_32S)
+        val small = BooleanArray(count) { it > 0 && stats.get(it, Imgproc.CC_STAT_AREA)[0] < minArea }
+        if (small.any { it }) {
+            val n = mask.cols() * mask.rows()
+            val lab = IntArray(n).also { labels.get(0, 0, it) }
+            val m = ByteArray(n).also { mask.get(0, 0, it) }
+            for (i in 0 until n) if (small[lab[i]]) m[i] = 0
+            mask.put(0, 0, m)
+        }
+        labels.release(); stats.release(); centroids.release()
+    }
+
     private fun saturation(src: Mat): Mat {
         val c = toColor3(src)
         val planes = ArrayList<Mat>()

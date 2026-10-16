@@ -1,5 +1,6 @@
 package io.github.swikrutd.swidscanner.ui
 
+import io.github.swikrutd.swidscanner.data.AssetKind
 import android.content.Context
 import android.net.Uri
 import androidx.compose.material3.AlertDialog
@@ -59,6 +60,15 @@ object Routes {
     const val HOME = "home"
     const val QR = "qr"
     const val SETTINGS = "settings"
+    const val LIBRARY = "assets/{kind}"
+    fun library(kind: AssetKind) = "assets/${kind.name}"
+    const val SIGNATURE_DRAW = "signature-draw"
+    const val STAMP_TEXT = "stamp-text"
+    /** Camera with a fixed window instead of page detection, for scanning an asset of [kind]. */
+    fun assetCamera(kind: AssetKind) = "camera?asset=${kind.name}"
+    const val ASSET_IMPORT = "asset-import/{kind}?window={window}"
+    /** Crop and ink cut-out for the photo in SigDraft. [window] presets the crop box to the camera window. */
+    fun assetImport(kind: AssetKind, window: Boolean) = "asset-import/${kind.name}?window=$window"
     fun camera(docId: String? = null) = if (docId == null) "camera" else "camera?docId=$docId"
     /** Camera that replaces [pageId]'s photo, then reopens its crop screen with [thenDoc]. */
     fun retake(docId: String, pageId: String, thenDoc: Boolean) = "camera?docId=$docId&retake=$pageId&thenDoc=$thenDoc"
