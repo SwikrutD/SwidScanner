@@ -54,10 +54,14 @@ fun OcrScreen(nav: NavController, docId: String, pageId: String) {
     var progress by remember { mutableFloatStateOf(0f) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    val ids = remember(pageId) { pageId.split(",").toSet() }
+    val many = pageId == "all" || ids.size > 1
+
     LaunchedEffect(docId, pageId) {
         val doc = DocStore.get(docId) ?: return@LaunchedEffect
         text = try {
-            if (pageId == "all") Ocr.docText(doc) { progress = it }
+            if (pageId == "all") Ocr.docText(doc, onProgress = { progress = it })
+            else if (ids.size > 1) Ocr.docText(doc, doc.pages.filter { it.id in ids }, onProgress = { progress = it })
             else Ocr.pageText(doc, doc.pages.first { it.id == pageId })
         } catch (e: Exception) {
             error = e.message; ""
@@ -68,7 +72,7 @@ fun OcrScreen(nav: NavController, docId: String, pageId: String) {
         snackbarHost = { SnackbarHost(snack) },
         topBar = {
             TopAppBar(
-                title = { Text(if (pageId == "all") "Document text" else "Page text") },
+                title = { Text(if (pageId == "all") "Document text" else if (many) "Selected text" else "Page text") },
                 navigationIcon = { IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } },
                 actions = {
                     val t = text
@@ -89,7 +93,7 @@ fun OcrScreen(nav: NavController, docId: String, pageId: String) {
                 t == null -> Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Reading text...")
                     Spacer(Modifier.height(12.dp))
-                    if (pageId == "all") LinearProgressIndicator(progress = { progress }, modifier = Modifier.width(200.dp))
+                    if (many) LinearProgressIndicator(progress = { progress }, modifier = Modifier.width(200.dp))
                     else LinearProgressIndicator(Modifier.width(200.dp))
                 }
                 t.isBlank() -> Text(

@@ -15,6 +15,8 @@ import com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode
 import com.tom_roush.pdfbox.util.Matrix
 import io.github.swikrutd.swidscanner.data.Doc
 import io.github.swikrutd.swidscanner.data.DocStore
+import io.github.swikrutd.swidscanner.data.Page
+import io.github.swikrutd.swidscanner.data.pageRangeLabel
 import io.github.swikrutd.swidscanner.data.PageSize
 import io.github.swikrutd.swidscanner.data.Quality
 import io.github.swikrutd.swidscanner.imaging.Images
@@ -40,28 +42,35 @@ data class ExportOptions(
 
 object Exporter {
 
-    /** Writes the export into a fresh cache folder and returns the files. */
-    suspend fun export(ctx: Context, doc: Doc, o: ExportOptions, onProgress: (Float) -> Unit = {}): List<File> =
+    /**
+     * Writes the export into a fresh cache folder and returns the files. [pages] limits the export
+     * to those pages (always in document order); null means the whole document. A subset adds a
+     * suffix such as "_pages_2-5" to the file names.
+     */
+    suspend fun export(
+        ctx: Context, doc: Doc, o: ExportOptions, pages: List<Page>? = null, onProgress: (Float) -> Unit = {},
+    ): List<File> =
         withContext(Dispatchers.IO) {
-            require(doc.pages.isNotEmpty()) { "This document has no pages" }
+            val picked = pick(doc, pages)
+            require(picked.isNotEmpty()) { "There are no pages to export" }
             val outDir = File(ctx.cacheDir, "exports/${System.currentTimeMillis()}").apply { mkdirs() }
-            val base = safeName(doc.name)
+            val base = safeName(doc.name) + nameSuffix(doc, picked)
             when (o.format) {
-                Format.PDF -> listOf(pdf(ctx, doc, o, File(outDir, "$base.pdf"), onProgress))
-                Format.JPEG -> doc.pages.mapIndexed { i, p ->
-                    val name = if (doc.pages.size == 1) "$base.jpg" else "${base}_%02d.jpg".format(i + 1)
+                Format.PDF -> listOf(pdf(ctx, doc, picked, o, File(outDir, "$base.pdf"), onProgress))
+                Format.JPEG -> picked.mapIndexed { i, p ->
+                    val name = if (picked.size == 1) "$base.jpg" else "${base}_%02d.jpg".format(i + 1)
                     val f = File(outDir, name)
                     val bmp = Images.decodeFile(DocStore.procFile(doc.id, p), o.quality.maxSide)
                     Images.saveJpeg(bmp, f, o.quality.jpeg)
                     bmp.recycle()
-                    onProgress((i + 1f) / doc.pages.size)
+                    onProgress((i + 1f) / picked.size)
                     f
                 }
-                Format.TEXT -> listOf(File(outDir, "$base.txt").apply { writeText(Ocr.docText(doc, onProgress)) })
+                Format.TEXT -> listOf(File(outDir, "$base.txt").apply { writeText(Ocr.docText(doc, picked, onProgress)) })
             }
         }
 
-    private suspend fun pdf(ctx: Context, doc: Doc, o: ExportOptions, out: File, onProgress: (Float) -> Unit): File {
+    private suspend fun pdf(ctx: Context, doc: Doc, pages: List<Page>, o: ExportOptions, out: File, onProgress: (Float) -> Unit): File {
         PDFBoxResourceLoader.init(ctx.applicationContext)
         val font = PDType1Font.HELVETICA
         val encodable = HashMap<Char, Boolean>()
@@ -70,7 +79,7 @@ object Exporter {
         }
 
         PDDocument().use { pdf ->
-            doc.pages.forEachIndexed { i, p ->
+            pages.forEachIndexed { i, p ->
                 val bmp = Images.decodeFile(DocStore.procFile(doc.id, p), o.quality.maxSide)
                 val bytes = ByteArrayOutputStream().also { bmp.compress(Bitmap.CompressFormat.JPEG, o.quality.jpeg, it) }.toByteArray()
                 val img = JPEGFactory.createFromByteArray(pdf, bytes)
@@ -114,7 +123,7 @@ object Exporter {
                     }
                 }
                 bmp.recycle()
-                onProgress((i + 1f) / doc.pages.size)
+                onProgress((i + 1f) / pages.size)
             }
             if (!o.password.isNullOrEmpty()) {
                 val policy = StandardProtectionPolicy(o.password, o.password, AccessPermission())
@@ -124,6 +133,21 @@ object Exporter {
             pdf.save(out)
         }
         return out
+    }
+
+    /** The pages of [doc] named in [pages], in document order; the whole document when null. */
+    private fun pick(doc: Doc, pages: List<Page>?): List<Page> {
+        if (pages == null) return doc.pages
+        val ids = pages.mapTo(HashSet()) { it.id }
+        return doc.pages.filter { it.id in ids }
+    }
+
+    /** "_pages_2-5" for a subset, empty when [picked] is the whole document. */
+    private fun nameSuffix(doc: Doc, picked: List<Page>): String {
+        if (picked.size == doc.pages.size) return ""
+        val ids = picked.mapTo(HashSet()) { it.id }
+        val nums = doc.pages.indices.filter { doc.pages[it].id in ids }.map { it + 1 }
+        return (if (nums.size == 1) "_page_" else "_pages_") + pageRangeLabel(nums)
     }
 
     fun safeName(name: String): String =

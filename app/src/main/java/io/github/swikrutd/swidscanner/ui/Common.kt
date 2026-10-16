@@ -76,6 +76,8 @@ object Routes {
     fun doc(docId: String) = "doc/$docId"
     fun page(docId: String, pageId: String) = "page/$docId/$pageId"
     fun ocr(docId: String, pageId: String = "all") = "ocr/$docId/$pageId"
+    /** Text of several pages: the page ids go in the last segment separated by commas. */
+    fun ocr(docId: String, pageIds: List<String>) = ocr(docId, pageIds.joinToString(","))
     const val PLACE = "place/{docId}/{pageId}?asset={asset}&overlay={overlay}"
     /** Signature and stamp placement on a page: [asset] adds a new placement, [overlay] selects an existing one. */
     fun place(docId: String, pageId: String, asset: String? = null, overlay: String? = null) = buildString {

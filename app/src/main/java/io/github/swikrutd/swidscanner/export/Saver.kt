@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import io.github.swikrutd.swidscanner.data.Doc
 import io.github.swikrutd.swidscanner.data.DocStore
+import io.github.swikrutd.swidscanner.data.Page
 import io.github.swikrutd.swidscanner.data.Settings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -58,11 +59,11 @@ object Saver {
 
     /**
      * Saves [doc] as a PDF with the default export settings, replacing the copy saved before,
-     * and records the result in [status].
+     * and records the result in [status]. [pages] limits it to those pages; null saves the whole document.
      */
-    suspend fun savePdf(ctx: Context, doc: Doc, auto: Boolean, driveToken: suspend () -> String?): String {
+    suspend fun savePdf(ctx: Context, doc: Doc, auto: Boolean, pages: List<Page>? = null, driveToken: suspend () -> String?): String {
         val opts = ExportOptions(Format.PDF, Settings.pageSize, Settings.quality, Settings.searchablePdf, null)
-        val files = Exporter.export(ctx, doc, opts)
+        val files = Exporter.export(ctx, doc, opts, pages)
         val summary = try {
             deliver(ctx, files, Format.PDF.mime, replace = true, driveToken)
         } finally {

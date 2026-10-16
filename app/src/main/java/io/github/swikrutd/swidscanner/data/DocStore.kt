@@ -65,6 +65,20 @@ data class Doc(
     val pages: List<Page>,
 )
 
+/** Page numbers as short ranges: [2, 3, 4, 5] gives "2-5" and [1, 2, 3, 6] gives "1-3,6". */
+fun pageRangeLabel(numbers: List<Int>): String {
+    val n = numbers.distinct().sorted()
+    val parts = ArrayList<String>()
+    var i = 0
+    while (i < n.size) {
+        var j = i
+        while (j + 1 < n.size && n[j + 1] == n[j] + 1) j++
+        parts += if (j == i) "${n[i]}" else "${n[i]}-${n[j]}"
+        i = j + 1
+    }
+    return parts.joinToString(",")
+}
+
 /**
  * Documents live in filesDir/docs/<docId>/ as doc.json plus, per page,
  * the untouched capture (<page>-orig.jpg), the rendered page (<page>-r<rev>.jpg)
@@ -188,6 +202,57 @@ object DocStore {
     suspend fun setFilterForAll(docId: String, filter: Filter) {
         get(docId)?.pages?.filter { it.filter != filter }?.forEach { p ->
             updatePage(docId, p.id) { it.copy(filter = filter) }
+        }
+    }
+
+    suspend fun setFilter(docId: String, pageIds: Collection<String>, filter: Filter) {
+        get(docId)?.pages?.filter { it.id in pageIds && it.filter != filter }?.forEach { p ->
+            updatePage(docId, p.id) { it.copy(filter = filter) }
+        }
+    }
+
+    suspend fun deletePages(docId: String, pageIds: Collection<String>) = withContext(Dispatchers.IO) {
+        meta.withLock {
+            val d = get(docId) ?: return@withLock
+            val gone = d.pages.filter { it.id in pageIds }
+            if (gone.isEmpty()) return@withLock
+            val nd = d.copy(pages = d.pages.filter { it.id !in pageIds }, updated = System.currentTimeMillis())
+            write(nd); publish(nd)
+            gone.forEach { p -> origFile(docId, p.id).delete(); procFile(docId, p).delete(); thumbFile(docId, p).delete() }
+        }
+    }
+
+    /**
+     * Copies the pages in [pageIds] (in document order) into a new document named after the
+     * original and returns it, or null if none of them exist. The original is left alone.
+     */
+    suspend fun extractPages(docId: String, pageIds: Collection<String>): Doc? = withContext(Dispatchers.IO) {
+        // Same lock order as updatePage, so a page that is re-rendering finishes first.
+        render.withLock {
+            meta.withLock {
+                val d = get(docId) ?: return@withLock null
+                val picked = d.pages.withIndex().filter { it.value.id in pageIds }
+                if (picked.isEmpty()) return@withLock null
+                val label = pageRangeLabel(picked.map { it.index + 1 })
+                val now = System.currentTimeMillis()
+                val id = newId()
+                try {
+                    dir(id).mkdirs()
+                    val pages = picked.map { (_, p) ->
+                        val np = p.copy(id = newId())
+                        origFile(docId, p.id).copyTo(origFile(id, np.id))
+                        procFile(docId, p).copyTo(procFile(id, np))
+                        thumbFile(docId, p).copyTo(thumbFile(id, np))
+                        np
+                    }
+                    val nd = Doc(id, "${d.name} (${if (picked.size == 1) "page" else "pages"} $label)", now, now, pages)
+                    write(nd); publish(nd)
+                    nd
+                } catch (e: Exception) {
+                    dir(id).deleteRecursively()
+                    throw e
+                }
+            }
         }
     }
 

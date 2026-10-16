@@ -1,10 +1,30 @@
 package io.github.swikrutd.swidscanner.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.FileCopy
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import io.github.swikrutd.swidscanner.core.Filter
+import io.github.swikrutd.swidscanner.data.Page
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +42,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.zIndex
@@ -81,13 +102,22 @@ fun DocScreen(nav: NavController, docId: String) {
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
+    // Pages being exported from the sheet; null means the whole document.
+    var exportPages by remember { mutableStateOf<List<Page>?>(null) }
+    var selecting by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var filterMenu by remember { mutableStateOf(false) }
+    var deletingSelected by remember { mutableStateOf(false) }
+    val snack = remember { SnackbarHostState() }
     var saving by remember { mutableStateOf(false) }
     val ctx = LocalContext.current
     val drive = rememberDriveAuthorizer()
     val saveStatus by Saver.status.collectAsState()
 
     // Drag-to-reorder state. dragOrder is the page order shown while dragging (and until the
-    // saved order arrives); it is written to the store once, on drop.
+    // saved order arrives); it is written to the store once, on drop. When a selected page is
+    // dragged, dragGroup holds every selected page and, once the finger moves, the grid shows only
+    // the dragged one while the others ride behind it.
     val gridState = rememberLazyGridState()
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
@@ -95,14 +125,23 @@ fun DocScreen(nav: NavController, docId: String) {
     var dragId by remember { mutableStateOf<String?>(null) }
     var finger by remember { mutableStateOf(Offset.Zero) }
     var grab by remember { mutableStateOf(Offset.Zero) }
-    val shown = remember(doc?.pages, dragOrder) {
+    var dragGroup by remember { mutableStateOf<List<String>>(emptyList()) }
+    var dragBase by remember { mutableStateOf<List<String>>(emptyList()) }
+    var dragMoved by remember { mutableStateOf(false) }
+    var dragStart by remember { mutableStateOf(Offset.Zero) }
+    val shown = remember(doc?.pages, dragOrder, dragId) {
         val pages = doc?.pages ?: emptyList()
         val order = dragOrder
-        if (order == null) pages else {
+        // After a drop, an order that no longer matches the pages (one was added or removed) is ignored.
+        if (order == null || (dragId == null && order.toSet() != pages.mapTo(HashSet()) { it.id })) pages else {
             val byId = pages.associateBy { it.id }
             order.mapNotNull { byId[it] }
         }
     }
+    val selectedPages = doc?.pages?.filter { it.id in selected } ?: emptyList()
+
+    fun exitSelection() { selecting = false; selected = emptySet(); filterMenu = false }
+    BackHandler(enabled = selecting) { exitSelection() }
 
     // Moves the dragged page into the slot under the finger.
     fun retarget() {
@@ -145,41 +184,59 @@ fun DocScreen(nav: NavController, docId: String) {
     LaunchedEffect(doc == null) { if (doc == null) nav.popBackStack() }
     if (doc == null) return
 
-    fun save() {
+    fun save(pages: List<Page>? = null) {
         saving = true
         scope.launch {
-            runCatching { Saver.savePdf(ctx, doc, auto = false) { drive.token() } }
+            runCatching { Saver.savePdf(ctx, doc, auto = false, pages = pages) { drive.token() } }
                 .onFailure { Saver.setStatus(docId, "Save failed: ${it.message}") }
             saving = false
         }
     }
     // With no save location on yet, Save asks for a folder first.
-    val pickFolder = rememberFolderPicker { save() }
+    var pendingSave by remember { mutableStateOf<List<Page>?>(null) }
+    val pickFolder = rememberFolderPicker { save(pendingSave) }
+    fun saveOrPick(pages: List<Page>?) {
+        if (Saver.hasDestination) save(pages) else { pendingSave = pages; pickFolder.launch(null) }
+    }
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            if (selecting) {
+                val allSelected = doc.pages.isNotEmpty() && selectedPages.size == doc.pages.size
+                TopAppBar(
+                    title = { Text("${selectedPages.size} selected", maxLines = 1) },
+                    navigationIcon = { IconButton(onClick = { exitSelection() }) { Icon(Icons.Outlined.Close, "Exit selection") } },
+                    actions = {
+                        TextButton(onClick = { selected = if (allSelected) emptySet() else doc.pages.mapTo(HashSet()) { it.id } }) {
+                            Text(if (allSelected) "Clear" else "Select all")
+                        }
+                    },
+                )
+            } else TopAppBar(
                 title = {
                     Text(doc.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable { renaming = true })
                 },
                 navigationIcon = { IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } },
                 actions = {
-                    IconButton(onClick = { nav.navigate(Routes.ocr(docId)) }, enabled = doc.pages.isNotEmpty()) {
-                        Icon(Icons.Outlined.TextSnippet, "Extract text")
+                    IconButton(onClick = { selecting = true }, enabled = doc.pages.isNotEmpty()) {
+                        Icon(Icons.Outlined.CheckCircle, "Select pages")
                     }
                     IconButton(
-                        onClick = { if (Saver.hasDestination) save() else pickFolder.launch(null) },
+                        onClick = { saveOrPick(null) },
                         enabled = doc.pages.isNotEmpty() && !saving,
                     ) {
                         if (saving) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
                         else Icon(Icons.Outlined.Save, "Save as PDF")
                     }
-                    IconButton(onClick = { exporting = true }, enabled = doc.pages.isNotEmpty()) {
+                    IconButton(onClick = { exportPages = null; exporting = true }, enabled = doc.pages.isNotEmpty()) {
                         Icon(Icons.Outlined.Share, "Share or export")
                     }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "More") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(text = { Text("Extract text") }, leadingIcon = { Icon(Icons.Outlined.TextSnippet, null) },
+                                enabled = doc.pages.isNotEmpty(),
+                                onClick = { menu = false; nav.navigate(Routes.ocr(docId)) })
                             DropdownMenuItem(text = { Text("Rename") }, leadingIcon = { Icon(Icons.Outlined.DriveFileRenameOutline, null) },
                                 onClick = { menu = false; renaming = true })
                             DropdownMenuItem(text = { Text("Delete document") }, leadingIcon = { Icon(Icons.Outlined.Delete, null) },
@@ -189,8 +246,48 @@ fun DocScreen(nav: NavController, docId: String) {
                 },
             )
         },
+        snackbarHost = { SnackbarHost(snack) },
+        bottomBar = {
+            if (selecting) {
+                val none = selectedPages.isEmpty()
+                Surface(tonalElevation = 3.dp) {
+                    Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        BarAction(Icons.Outlined.Share, "Share", !none) { exportPages = selectedPages; exporting = true }
+                        BarAction(Icons.Outlined.Save, "Save", !none && !saving) { saveOrPick(selectedPages) }
+                        BarAction(Icons.Outlined.Delete, "Delete", !none) { deletingSelected = true }
+                        BarAction(Icons.Outlined.TextSnippet, "OCR", !none) { nav.navigate(Routes.ocr(docId, selectedPages.map { it.id })) }
+                        Box {
+                            BarAction(Icons.Outlined.Tune, "Filter", !none) { filterMenu = true }
+                            DropdownMenu(expanded = filterMenu, onDismissRequest = { filterMenu = false }) {
+                                Filter.entries.forEach { f ->
+                                    DropdownMenuItem(text = { Text(f.label) }, onClick = {
+                                        filterMenu = false
+                                        val ids = selectedPages.map { it.id }
+                                        scope.launch { DocStore.setFilter(docId, ids, f) }
+                                    })
+                                }
+                            }
+                        }
+                        BarAction(Icons.Outlined.FileCopy, "Extract", !none) {
+                            val ids = selectedPages.map { it.id }
+                            scope.launch {
+                                val made = runCatching { DocStore.extractPages(docId, ids) }
+                                val nd = made.getOrNull()
+                                if (nd == null) {
+                                    snack.showSnackbar("Could not extract: ${made.exceptionOrNull()?.message ?: "no pages"}")
+                                } else {
+                                    exitSelection()
+                                    val r = snack.showSnackbar("Copied ${nd.pages.size} to \"${nd.name}\"", "Open")
+                                    if (r == SnackbarResult.ActionPerformed) nav.navigate(Routes.doc(nd.id))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
+            if (!selecting) ExtendedFloatingActionButton(
                 onClick = { nav.navigate(Routes.camera(docId)) },
                 icon = { Icon(Icons.Outlined.AddAPhoto, null) },
                 text = { Text("Add pages") },
@@ -220,30 +317,56 @@ fun DocScreen(nav: NavController, docId: String) {
                                     off.x >= it.offset.x && off.x < it.offset.x + it.size.width &&
                                         off.y >= it.offset.y && off.y < it.offset.y + it.size.height
                                 } ?: return@detectDragGesturesAfterLongPress
+                                val id = hit.key as? String ?: return@detectDragGesturesAfterLongPress
+                                val base = DocStore.get(docId)?.pages?.map { it.id } ?: return@detectDragGesturesAfterLongPress
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                dragOrder = DocStore.get(docId)?.pages?.map { it.id }
+                                // A selected page takes the whole selection with it; any other page goes alone.
+                                dragGroup = if (selecting && id in selected) base.filter { it in selected } else listOf(id)
+                                dragBase = base
+                                dragOrder = base
+                                dragMoved = false
+                                dragStart = off
                                 grab = off - Offset(hit.offset.x.toFloat(), hit.offset.y.toFloat())
                                 finger = off
-                                dragId = hit.key as? String
+                                dragId = id
                             },
                             onDrag = { change, _ ->
-                                if (dragId != null) {
+                                val id = dragId
+                                if (id != null) {
                                     change.consume()
                                     finger = change.position
+                                    if (!dragMoved && (finger - dragStart).getDistance() > viewConfiguration.touchSlop) {
+                                        dragMoved = true
+                                        // The rest of the selection leaves the grid and rides behind the dragged page.
+                                        if (dragGroup.size > 1) dragOrder = dragBase.filter { it == id || it !in dragGroup }
+                                    }
                                     retarget()
                                 }
                             },
                             onDragEnd = {
                                 val id = dragId
                                 val order = dragOrder
+                                val group = dragGroup
                                 dragId = null
                                 if (id != null && order != null) {
-                                    if (order == DocStore.get(docId)?.pages?.map { it.id }) dragOrder = null
-                                    else scope.launch { DocStore.movePages(docId, listOf(id), order.indexOf(id)) }
+                                    if (!dragMoved) {
+                                        // A long press released without moving selects the page.
+                                        dragOrder = null
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        selecting = true
+                                        selected = selected + id
+                                    } else {
+                                        val moving = dragBase.filter { it in group }
+                                        val rest = dragBase.filter { it !in group }
+                                        val at = order.indexOf(id).coerceIn(0, rest.size)
+                                        dragOrder = rest.take(at) + moving + rest.drop(at)
+                                        scope.launch { DocStore.movePages(docId, moving, at) }
+                                    }
                                 }
-                                // A long press released without moving is reserved for selection (Step 6).
+                                dragMoved = false
+                                dragGroup = emptyList()
                             },
-                            onDragCancel = { dragId = null; dragOrder = null },
+                            onDragCancel = { dragId = null; dragOrder = null; dragMoved = false; dragGroup = emptyList() },
                         )
                     },
                 ) {
@@ -265,8 +388,33 @@ fun DocScreen(nav: NavController, docId: String) {
                                     }
                                 }
                                 .padding(8.dp).fillMaxWidth().aspectRatio(0.75f)
-                                .clickable { if (dragId == null) nav.navigate(Routes.page(docId, p.id)) },
+                                .clickable {
+                                    if (dragId == null) {
+                                        if (selecting) selected = if (p.id in selected) selected - p.id else selected + p.id
+                                        else nav.navigate(Routes.page(docId, p.id))
+                                    }
+                                },
                         ) {
+                            val stacked = lifted && dragMoved && dragGroup.size > 1
+                            if (stacked) {
+                                // Up to two other selected pages, tilted behind the dragged one.
+                                val d = density.density
+                                dragGroup.filter { it != p.id }.take(2).forEachIndexed { k, oid ->
+                                    val op = doc.pages.firstOrNull { it.id == oid } ?: return@forEachIndexed
+                                    AsyncImage(
+                                        model = DocStore.thumbFile(docId, op), contentDescription = null,
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier.fillMaxSize()
+                                            .graphicsLayer {
+                                                rotationZ = if (k == 0) -7f else 6f
+                                                translationX = (if (k == 0) -6f else 8f) * d
+                                                translationY = 5f * (k + 1) * d
+                                            }
+                                            .shadow(4.dp, RoundedCornerShape(4.dp)).clip(RoundedCornerShape(4.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                    )
+                                }
+                            }
                             AsyncImage(
                                 model = DocStore.thumbFile(docId, p), contentDescription = "Page ${i + 1}",
                                 contentScale = ContentScale.Fit,
@@ -279,6 +427,25 @@ fun DocScreen(nav: NavController, docId: String) {
                                 modifier = Modifier.align(Alignment.BottomCenter).padding(6.dp)
                                     .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 2.dp),
                             )
+                            if (selecting) {
+                                val sel = p.id in selected
+                                if (sel) Box(Modifier.matchParentSize().clip(RoundedCornerShape(4.dp)).background(Color.Black.copy(alpha = 0.3f)))
+                                Icon(
+                                    if (sel) Icons.Filled.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                                    if (sel) "Selected" else "Not selected",
+                                    tint = if (sel) MaterialTheme.colorScheme.primary else Color.White,
+                                    modifier = Modifier.align(Alignment.TopStart).padding(6.dp).size(26.dp)
+                                        .background(if (sel) Color.White else Color.Black.copy(alpha = 0.25f), CircleShape),
+                                )
+                            }
+                            if (stacked) {
+                                Text(
+                                    "${dragGroup.size}", fontWeight = FontWeight.Bold, fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)
+                                        .background(MaterialTheme.colorScheme.primary, CircleShape).padding(horizontal = 9.dp, vertical = 4.dp),
+                                )
+                            }
                             if (p.id in busy) CircularProgressIndicator(Modifier.align(Alignment.Center))
                         }
                     }
@@ -287,7 +454,16 @@ fun DocScreen(nav: NavController, docId: String) {
         }
     }
 
-    if (exporting) ExportSheet(doc, onDismiss = { exporting = false })
+    if (exporting) ExportSheet(doc, pages = exportPages, onDismiss = { exporting = false })
+    if (deletingSelected) {
+        val ids = selectedPages.map { it.id }
+        ConfirmDialog("Delete ${ids.size} page(s)?", "They will be removed from this phone.", "Delete",
+            onDismiss = { deletingSelected = false }) {
+            deletingSelected = false
+            exitSelection()
+            scope.launch { DocStore.deletePages(docId, ids) }
+        }
+    }
     if (renaming) RenameDialog(doc.name, onDismiss = { renaming = false }) { n -> scope.launch { DocStore.rename(docId, n) }; renaming = false }
     if (deleting) {
         ConfirmDialog("Delete document?", "All ${doc.pages.size} page(s) will be removed from this phone.", "Delete",
@@ -295,5 +471,17 @@ fun DocScreen(nav: NavController, docId: String) {
             deleting = false
             scope.launch { DocStore.deleteDoc(docId) }
         }
+    }
+}
+
+@Composable
+private fun BarAction(icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit) {
+    val color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    Column(
+        Modifier.clip(RoundedCornerShape(10.dp)).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, null, tint = color)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = color, maxLines = 1)
     }
 }

@@ -50,6 +50,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.swikrutd.swidscanner.data.Doc
+import io.github.swikrutd.swidscanner.data.Page
 import io.github.swikrutd.swidscanner.data.PageSize
 import io.github.swikrutd.swidscanner.data.Quality
 import io.github.swikrutd.swidscanner.data.Settings
@@ -64,7 +65,7 @@ import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ExportSheet(doc: Doc, onDismiss: () -> Unit) {
+fun ExportSheet(doc: Doc, pages: List<Page>? = null, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -86,7 +87,7 @@ fun ExportSheet(doc: Doc, onDismiss: () -> Unit) {
     suspend fun build(): List<File> {
         Settings.pageSize = pageSize; Settings.quality = quality; Settings.searchablePdf = searchable
         progress = 0f
-        return Exporter.export(ctx, doc, options()) { progress = it }
+        return Exporter.export(ctx, doc, options(), pages) { progress = it }
     }
 
     fun save() {
@@ -122,6 +123,12 @@ fun ExportSheet(doc: Doc, onDismiss: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text("Save or share", style = MaterialTheme.typography.titleLarge)
+            if (pages != null) {
+                Text(
+                    if (pages.size == 1) "1 selected page" else "${pages.size} selected pages",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             Segmented(Format.entries, format, { it.label }) { format = it }
 

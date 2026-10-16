@@ -22,11 +22,14 @@ object Ocr {
         return try { recognize(bmp).text } finally { bmp.recycle() }
     }
 
-    suspend fun docText(doc: Doc, onProgress: (Float) -> Unit = {}): String {
-        val parts = doc.pages.mapIndexed { i, p ->
+    /** Text of [pages] (the whole document when null), headed with each page's number in the document. */
+    suspend fun docText(doc: Doc, pages: List<Page>? = null, onProgress: (Float) -> Unit = {}): String {
+        val ids = pages?.mapTo(HashSet()) { it.id }
+        val picked = doc.pages.withIndex().filter { ids == null || it.value.id in ids }
+        val parts = picked.mapIndexed { n, (i, p) ->
             val t = pageText(doc, p)
-            onProgress((i + 1f) / doc.pages.size)
-            if (doc.pages.size > 1) "--- Page ${i + 1} ---\n$t" else t
+            onProgress((n + 1f) / picked.size)
+            if (picked.size > 1) "--- Page ${i + 1} ---\n$t" else t
         }
         return parts.joinToString("\n\n")
     }
