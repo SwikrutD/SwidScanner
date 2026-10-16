@@ -11,8 +11,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -73,6 +85,62 @@ fun DocScreen(nav: NavController, docId: String) {
     val ctx = LocalContext.current
     val drive = rememberDriveAuthorizer()
     val saveStatus by Saver.status.collectAsState()
+
+    // Drag-to-reorder state. dragOrder is the page order shown while dragging (and until the
+    // saved order arrives); it is written to the store once, on drop.
+    val gridState = rememberLazyGridState()
+    val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    var dragOrder by remember { mutableStateOf<List<String>?>(null) }
+    var dragId by remember { mutableStateOf<String?>(null) }
+    var finger by remember { mutableStateOf(Offset.Zero) }
+    var grab by remember { mutableStateOf(Offset.Zero) }
+    val shown = remember(doc?.pages, dragOrder) {
+        val pages = doc?.pages ?: emptyList()
+        val order = dragOrder
+        if (order == null) pages else {
+            val byId = pages.associateBy { it.id }
+            order.mapNotNull { byId[it] }
+        }
+    }
+
+    // Moves the dragged page into the slot under the finger.
+    fun retarget() {
+        val id = dragId ?: return
+        val order = dragOrder ?: return
+        val hit = gridState.layoutInfo.visibleItemsInfo.firstOrNull {
+            finger.x >= it.offset.x && finger.x < it.offset.x + it.size.width &&
+                finger.y >= it.offset.y && finger.y < it.offset.y + it.size.height
+        }?.key as? String ?: return
+        if (hit == id) return
+        val to = order.indexOf(hit)
+        if (to < 0) return
+        dragOrder = order.toMutableList().apply { remove(id); add(to, id) }
+    }
+
+    LaunchedEffect(dragId) {
+        if (dragId == null) return@LaunchedEffect
+        val edge = with(density) { 80.dp.toPx() }
+        val maxStep = with(density) { 14.dp.toPx() }
+        while (true) {
+            withFrameNanos { }
+            val h = gridState.layoutInfo.viewportSize.height
+            val y = finger.y
+            val step = when {
+                y < edge -> -((edge - y) / edge).coerceIn(0f, 1f) * maxStep
+                y > h - edge -> ((y - (h - edge)) / edge).coerceIn(0f, 1f) * maxStep
+                else -> 0f
+            }
+            if (step != 0f) gridState.scrollBy(step)
+            retarget()
+        }
+    }
+
+    // Drop the local order once the store has caught up with it.
+    LaunchedEffect(doc?.pages, dragId) {
+        val order = dragOrder
+        if (dragId == null && order != null && doc?.pages?.map { it.id } == order) dragOrder = null
+    }
 
     LaunchedEffect(doc == null) { if (doc == null) nav.popBackStack() }
     if (doc == null) return
@@ -142,16 +210,67 @@ fun DocScreen(nav: NavController, docId: String) {
                 }
             } else {
                 LazyVerticalGrid(
+                    state = gridState,
                     columns = GridCells.Adaptive(150.dp),
                     contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 120.dp),
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().pointerInput(docId) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { off ->
+                                val hit = gridState.layoutInfo.visibleItemsInfo.firstOrNull {
+                                    off.x >= it.offset.x && off.x < it.offset.x + it.size.width &&
+                                        off.y >= it.offset.y && off.y < it.offset.y + it.size.height
+                                } ?: return@detectDragGesturesAfterLongPress
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                dragOrder = DocStore.get(docId)?.pages?.map { it.id }
+                                grab = off - Offset(hit.offset.x.toFloat(), hit.offset.y.toFloat())
+                                finger = off
+                                dragId = hit.key as? String
+                            },
+                            onDrag = { change, _ ->
+                                if (dragId != null) {
+                                    change.consume()
+                                    finger = change.position
+                                    retarget()
+                                }
+                            },
+                            onDragEnd = {
+                                val id = dragId
+                                val order = dragOrder
+                                dragId = null
+                                if (id != null && order != null) {
+                                    if (order == DocStore.get(docId)?.pages?.map { it.id }) dragOrder = null
+                                    else scope.launch { DocStore.movePages(docId, listOf(id), order.indexOf(id)) }
+                                }
+                                // A long press released without moving is reserved for selection (Step 6).
+                            },
+                            onDragCancel = { dragId = null; dragOrder = null },
+                        )
+                    },
                 ) {
-                    itemsIndexed(doc.pages, key = { _, p -> p.id }) { i, p ->
-                        Box(Modifier.padding(8.dp).fillMaxWidth().aspectRatio(0.75f).clickable { nav.navigate(Routes.page(docId, p.id)) }) {
+                    itemsIndexed(shown, key = { _, p -> p.id }) { i, p ->
+                        val lifted = dragId == p.id
+                        val scale by animateFloatAsState(if (lifted) 1.08f else 1f, label = "lift")
+                        Box(
+                            Modifier
+                                .then(if (lifted) Modifier else Modifier.animateItem())
+                                .zIndex(if (lifted) 1f else 0f)
+                                .graphicsLayer {
+                                    scaleX = scale; scaleY = scale
+                                    if (lifted) {
+                                        val info = gridState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == p.id }
+                                        if (info != null) {
+                                            translationX = finger.x - grab.x - info.offset.x
+                                            translationY = finger.y - grab.y - info.offset.y
+                                        }
+                                    }
+                                }
+                                .padding(8.dp).fillMaxWidth().aspectRatio(0.75f)
+                                .clickable { if (dragId == null) nav.navigate(Routes.page(docId, p.id)) },
+                        ) {
                             AsyncImage(
                                 model = DocStore.thumbFile(docId, p), contentDescription = "Page ${i + 1}",
                                 contentScale = ContentScale.Fit,
-                                modifier = Modifier.fillMaxSize().shadow(2.dp, RoundedCornerShape(4.dp)).clip(RoundedCornerShape(4.dp))
+                                modifier = Modifier.fillMaxSize().shadow(if (lifted) 14.dp else 2.dp, RoundedCornerShape(4.dp)).clip(RoundedCornerShape(4.dp))
                                     .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                             )
                             Text(

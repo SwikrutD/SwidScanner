@@ -214,6 +214,26 @@ object DocStore {
         }
     }
 
+    /**
+     * Takes [pageIds] out of the document and puts them back as one block so the first of them
+     * ends up at [toIndex] in the new order (counted after the removal, clamped to the end).
+     * The pages keep the order they had in the document. Writes once.
+     */
+    suspend fun movePages(docId: String, pageIds: List<String>, toIndex: Int) = withContext(Dispatchers.IO) {
+        meta.withLock {
+            val d = get(docId) ?: return@withLock
+            val ids = pageIds.toSet()
+            val moving = d.pages.filter { it.id in ids }
+            if (moving.isEmpty()) return@withLock
+            val rest = d.pages.filter { it.id !in ids }
+            val at = toIndex.coerceIn(0, rest.size)
+            val list = rest.take(at) + moving + rest.drop(at)
+            if (list.map { it.id } == d.pages.map { it.id }) return@withLock
+            val nd = d.copy(pages = list, updated = System.currentTimeMillis())
+            write(nd); publish(nd)
+        }
+    }
+
     suspend fun rename(docId: String, name: String) = withContext(Dispatchers.IO) {
         meta.withLock {
             val d = get(docId) ?: return@withLock
