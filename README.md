@@ -13,7 +13,10 @@ An open-source document scanner for Android. No account, no ads and no cloud pro
 - **Gallery import.** Turn existing photos into scanned pages, with the same automatic crop.
 - **Corner adjustment** with draggable handles and a magnifier, plus Auto (re-detect), Full (no crop) and Retake (replace the photo, keeping the page in place).
 - **Five filters:** Original, Magic (flattens shadows and whitens paper), Enhance, Grayscale and B&W. Set a default and apply one to every page.
-- **Page tools:** rotate, reorder, delete, pinch or double-tap to zoom.
+- **Page tools:** rotate, delete, pinch or double-tap to zoom. Press and hold a page in the document grid, then drag it to a new place.
+- **Select pages.** Press and hold a page to select it, tap others to add them, or use Select all. Share, save, delete, run OCR, apply a filter or extract the selected pages into a new document. Dragging a selected page moves the whole selection.
+- **Signatures and stamps.** Build a library of signatures (draw, photo, camera scan or file) and stamps (photo, scan, file or text with templates such as APPROVED and PAID). Place them on any page, then move, resize, rotate, recolour or fade them. Copy one to other pages. Overlays stay editable until you export. Signatures and stamps can be shared between phones as .swidsig and .swidstamp files.
+- **ID card scan.** Shoot the front and back of a card and get both on one A4 page at true size, ready to print. Presets for ID card, passport, single side and custom sizes, with an optional watermark text.
 - **Text recognition (OCR):** extract text from a page or the whole document, edit it, copy or share it. Works offline.
 - **Export:** PDF (Fit image, A4 or Letter; three quality levels; optional searchable text layer; optional password), JPEG images or a .txt file.
 - **Save locations:** the Save button writes a document as a PDF to a folder on the phone or SD card, a linked Google Drive folder or both, each with its own on/off switch. Turn on **Auto-save** to save every document a few seconds after you scan or edit it. Scans themselves stay inside the app. Share to any app at any time.
@@ -22,7 +25,7 @@ An open-source document scanner for Android. No account, no ads and no cloud pro
 
 ## Install
 
-Copy `SwidScanner-1.1.0.apk` to the phone and open it. Android will ask you to allow installs from that source the first time. Requires Android 8.0 or later.
+Copy `SwidScanner-1.2.0.apk` to the phone and open it. Android will ask you to allow installs from that source the first time. Requires Android 8.0 or later.
 
 ## Build
 
