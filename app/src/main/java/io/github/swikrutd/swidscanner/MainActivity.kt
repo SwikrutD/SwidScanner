@@ -100,16 +100,20 @@ private fun AppNav(route: String?, onRouted: () -> Unit) {
     NavHost(navController = nav, startDestination = Routes.HOME) {
         composable(Routes.HOME) { HomeScreen(nav) }
         composable(
-            "camera?docId={docId}&retake={retake}&thenDoc={thenDoc}&asset={asset}",
+            "camera?docId={docId}&retake={retake}&thenDoc={thenDoc}&asset={asset}&id={id}",
             arguments = listOf(
                 navArgument("docId") { type = NavType.StringType; nullable = true; defaultValue = null },
                 navArgument("retake") { type = NavType.StringType; nullable = true; defaultValue = null },
                 navArgument("thenDoc") { type = NavType.BoolType; defaultValue = false },
                 navArgument("asset") { type = NavType.StringType; nullable = true; defaultValue = null },
+                navArgument("id") { type = NavType.BoolType; defaultValue = false },
             ),
         ) {
             val a = it.arguments
-            CameraScreen(nav, a?.getString("docId"), a?.getString("retake"), a?.getBoolean("thenDoc") ?: false, assetKindArg(a?.getString("asset")))
+            CameraScreen(
+                nav, a?.getString("docId"), a?.getString("retake"), a?.getBoolean("thenDoc") ?: false,
+                assetKindArg(a?.getString("asset")), a?.getBoolean("id") ?: false,
+            )
         }
         composable(
             "crop/{docId}/{pageId}?thenDoc={thenDoc}",

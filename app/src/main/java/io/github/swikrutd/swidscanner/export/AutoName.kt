@@ -9,6 +9,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Names new documents after the largest line of text on their first page (usually the
@@ -19,6 +22,14 @@ object AutoName {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val tried = HashSet<String>()
     private val defaultName = Regex("""Scan \d{4}-\d{2}-\d{2} \d{2}\.\d{2}""")
+
+    /**
+     * "<prefix> <date>" with the date written like a new scan's default name, for example
+     * "ID card 2026-10-16 14.05". Only "Scan <date>" is renamed from the page text, so a
+     * document named this way keeps its name.
+     */
+    fun dated(prefix: String): String =
+        "$prefix " + SimpleDateFormat("yyyy-MM-dd HH.mm", Locale.getDefault()).format(Date())
 
     fun start(ctx: Context) {
         scope.launch {

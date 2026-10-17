@@ -109,6 +109,34 @@ object Settings {
         get() = p.getBoolean("searchable", true)
         set(v) = p.edit { putBoolean("searchable", v) }
 
+    /** ID card scan: the last preset used, by name. */
+    var idPreset: String?
+        get() = p.getString("idPreset", null)
+        set(v) = p.edit { putString("idPreset", v) }
+
+    /** ID card scan: card size in mm for the custom preset. */
+    var idCustomWidth: Float
+        get() = p.getFloat("idCustomW", 85.6f)
+        set(v) = p.edit { putFloat("idCustomW", v) }
+
+    var idCustomHeight: Float
+        get() = p.getFloat("idCustomH", 54f)
+        set(v) = p.edit { putFloat("idCustomH", v) }
+
+    /** ID card pages: card size as a share of true size, and whether the cards are blown up to fill the page instead. */
+    var idScale: Float
+        get() = p.getFloat("idScale", 1f)
+        set(v) = p.edit { putFloat("idScale", v) }
+
+    var idFit: Boolean
+        get() = p.getBoolean("idFit", false)
+        set(v) = p.edit { putBoolean("idFit", v) }
+
+    /** ID card scan has its own auto-capture switch, off by default: a card is quick to line up by hand. */
+    var idAutoCapture: Boolean
+        get() = p.getBoolean("idAuto", false)
+        set(v) = p.edit { putBoolean("idAuto", v) }
+
     private inline fun <reified E : Enum<E>> enumOr(name: String?, def: E): E =
         name?.let { n -> enumValues<E>().firstOrNull { it.name == n } } ?: def
 }

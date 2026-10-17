@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Badge
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
@@ -120,6 +121,7 @@ fun HomeScreen(nav: NavController) {
         },
         floatingActionButton = {
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SmallFloatingActionButton(onClick = { nav.navigate(Routes.ID_CARD) }) { Icon(Icons.Outlined.Badge, "Scan ID card") }
                 SmallFloatingActionButton(onClick = {
                     picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 }) { Icon(Icons.Outlined.PhotoLibrary, "Import from gallery") }

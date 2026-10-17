@@ -69,6 +69,8 @@ object Routes {
     const val ASSET_IMPORT = "asset-import/{kind}?window={window}"
     /** Crop and ink cut-out for the photo in SigDraft. [window] presets the crop box to the camera window. */
     fun assetImport(kind: AssetKind, window: Boolean) = "asset-import/${kind.name}?window=$window"
+    /** ID card scan: card guide camera, front and back, laid out on an A4 page. */
+    const val ID_CARD = "camera?id=true"
     fun camera(docId: String? = null) = if (docId == null) "camera" else "camera?docId=$docId"
     /** Camera that replaces [pageId]'s photo, then reopens its crop screen with [thenDoc]. */
     fun retake(docId: String, pageId: String, thenDoc: Boolean) = "camera?docId=$docId&retake=$pageId&thenDoc=$thenDoc"

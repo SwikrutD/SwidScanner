@@ -4,13 +4,16 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
+import android.graphics.Typeface
 import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
 import io.github.swikrutd.swidscanner.core.DocProcessing
+import io.github.swikrutd.swidscanner.core.Filter
 import io.github.swikrutd.swidscanner.data.AssetStore
 import io.github.swikrutd.swidscanner.data.Corner
 import io.github.swikrutd.swidscanner.data.Overlay
@@ -20,6 +23,7 @@ import org.opencv.core.Mat
 import org.opencv.core.Point
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -136,6 +140,65 @@ object Images {
     }
 
     private fun scaleFor(b: Bitmap) = minOf(1f, 1000f / max(b.width, b.height))
+
+    /**
+     * Cuts a card out of an upright [photo] and flattens it to [w] x [h] px (see DocProcessing.cutCard).
+     * [guide] is the camera's card guide as (left, top, right, bottom) normalised to the photo, or
+     * null for a gallery picture. Returns the card and whether its outline was found.
+     */
+    fun cutCard(photo: Bitmap, guide: DoubleArray?, w: Int, h: Int): Pair<Bitmap, Boolean> {
+        val m = toMat(photo)
+        val g = guide?.let {
+            val x0 = (it[0] * m.cols()).roundToInt().coerceIn(0, m.cols() - 1)
+            val y0 = (it[1] * m.rows()).roundToInt().coerceIn(0, m.rows() - 1)
+            val x1 = (it[2] * m.cols()).roundToInt().coerceIn(x0 + 1, m.cols())
+            val y1 = (it[3] * m.rows()).roundToInt().coerceIn(y0 + 1, m.rows())
+            DocProcessing.PxRect(x0, y0, x1 - x0, y1 - y0)
+        }
+        val (card, found) = DocProcessing.cutCard(m, g, w, h)
+        m.release()
+        return toBitmap(card).also { card.release() } to found
+    }
+
+    /**
+     * An A4 page at [dpi] with [cards] (one, or front and back) at [scale] times the true size of a
+     * [wMm] x [hMm] card, each card filtered with [filter] first, and [watermark] tiled over it when not blank.
+     */
+    fun renderIdPage(cards: List<Bitmap>, wMm: Double, hMm: Double, filter: Filter, watermark: String, dpi: Double, scale: Double = 1.0): Bitmap {
+        val mats = cards.map { c -> toMat(c).let { m -> DocProcessing.applyFilter(m, filter).also { m.release() } } }
+        val page = DocProcessing.renderIdPage(mats, wMm, hMm, dpi, scale)
+        mats.forEach { it.release() }
+        val out = toBitmap(page).also { page.release() }
+        if (watermark.isNotBlank()) drawWatermark(out, watermark.trim())
+        return out
+    }
+
+    /**
+     * Tiles [text] across the mutable bitmap [b] at -45 degrees in black at 10% opacity. Every other
+     * row is shifted by half a step so the copies do not line up in columns. Sizes follow the
+     * bitmap width, so a small preview looks like the full page.
+     */
+    fun drawWatermark(b: Bitmap, text: String) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(26, 0, 0, 0)
+            textSize = b.width / 24f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val step = paint.measureText(text) + paint.textSize * 2
+        val rowGap = paint.textSize * 3.5f
+        val cx = b.width / 2f; val cy = b.height / 2f
+        // Rotated rows have to cover the page's diagonal in every direction.
+        val reach = hypot(b.width.toFloat(), b.height.toFloat()) / 2 + step
+        val canvas = Canvas(b)
+        canvas.rotate(-45f, cx, cy)
+        var row = 0
+        var y = cy - reach
+        while (y < cy + reach) {
+            var x = cx - reach + if (row % 2 == 1) step / 2 else 0f
+            while (x < cx + reach) { canvas.drawText(text, x, y, paint); x += step }
+            y += rowGap; row++
+        }
+    }
 
     /** Crop, rotate and filter a capture into the final page image, then draw its overlays. */
     fun renderPage(orig: Bitmap, page: Page): Bitmap {

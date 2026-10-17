@@ -54,6 +54,16 @@ fun main(args: Array<String>) {
         ink(args[1], java.io.File(args[2]))
         return
     }
+    if (args[0] == "idcard") {
+        // idcard <front|synth> <back|synth> <out>: cut out both sides and lay them out on A4 (see IdCard.kt).
+        idCard(args[1], args[2], java.io.File(args[3]))
+        return
+    }
+    if (args[0] == "idmeasure") {
+        // idmeasure <page.jpg>: card sizes and gaps on a 300 dpi page, for example one pulled from the phone.
+        idMeasure(java.io.File(args[1]))
+        return
+    }
     if (args[0] == "cands") {
         // cands <frame dir> <frame name>: prints every candidate quad and its per-side edge support.
         val f = loadFrames(java.io.File(args[1])).first { it.name == args[2] }

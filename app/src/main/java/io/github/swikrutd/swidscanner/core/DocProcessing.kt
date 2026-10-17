@@ -891,6 +891,312 @@ object DocProcessing {
         return out
     }
 
+    /** Perspective-corrects the region inside [quad] (TL, TR, BR, BL) to exactly [w] x [h] pixels. */
+    fun warpTo(src: Mat, quad: List<Point>, w: Int, h: Int): Mat {
+        val (tl, tr, br, bl) = quad
+        val srcPts = MatOfPoint2f(tl, tr, br, bl)
+        val dstPts = MatOfPoint2f(
+            Point(0.0, 0.0), Point(w - 1.0, 0.0), Point(w - 1.0, h - 1.0), Point(0.0, h - 1.0)
+        )
+        val m = Imgproc.getPerspectiveTransform(srcPts, dstPts)
+        val out = Mat()
+        Imgproc.warpPerspective(src, out, m, Size(w.toDouble(), h.toDouble()), Imgproc.INTER_CUBIC, Core.BORDER_REPLICATE)
+        srcPts.release(); dstPts.release(); m.release()
+        return out
+    }
+
+    // ---- ID cards ----
+
+    /** ID card pages are laid out at this resolution: A4 is 2480 x 3508 px and an ID-1 card 1011 x 638 px. */
+    const val ID_DPI = 300.0
+    const val A4_W_MM = 210.0
+    const val A4_H_MM = 297.0
+    /** ISO/IEC 7810 ID-1: bank cards, most national ID cards and driving licences. */
+    const val ID1_W_MM = 85.6
+    const val ID1_H_MM = 54.0
+    const val ID1_RADIUS_MM = 3.18
+    /** Gap between each card of a two-sided page and the page's horizontal centre line. */
+    const val ID_GAP_MM = 20.0
+    /** Cards too big for the page, or blown up to fill it, keep at least this margin. */
+    private const val ID_MARGIN_MM = 10.0
+
+    /** An axis-aligned rectangle in whole pixels. */
+    data class PxRect(val x: Int, val y: Int, val w: Int, val h: Int)
+
+    fun mmToPx(mm: Double, dpi: Double = ID_DPI): Double = mm * dpi / 25.4
+
+    /** Width and height of an A4 page in pixels at [dpi]. */
+    fun a4Px(dpi: Double = ID_DPI): Pair<Int, Int> = mmToPx(A4_W_MM, dpi).roundToInt() to mmToPx(A4_H_MM, dpi).roundToInt()
+
+    /** Corner radius for a card [wMm] wide: the ID-1 radius scaled with the card width. */
+    fun cardRadiusMm(wMm: Double): Double = ID1_RADIUS_MM * wMm / ID1_W_MM
+
+    /**
+     * The largest scale (1 is true size) at which [count] cards of [wMm] x [hMm] fit on an A4 page
+     * laid out as [idSlots] does, keeping [ID_MARGIN_MM] to the page edges.
+     */
+    fun idMaxScale(wMm: Double, hMm: Double, count: Int): Double {
+        val availH = if (count == 1) A4_H_MM - 2 * ID_MARGIN_MM else A4_H_MM / 2 - ID_GAP_MM - ID_MARGIN_MM
+        return min((A4_W_MM - 2 * ID_MARGIN_MM) / wMm, availH / hMm)
+    }
+
+    /**
+     * Where the cards go on an A4 page at [dpi]: [count] slots of [wMm] x [hMm] times [scale]
+     * (1 is true size), centred left to right. One slot sits in the middle of the page. Two slots
+     * put the front above the horizontal centre line and the back below it, each [ID_GAP_MM] from
+     * the line. A card too big for that is scaled down to fit ([idMaxScale]), keeping its shape.
+     */
+    fun idSlots(wMm: Double, hMm: Double, count: Int, dpi: Double = ID_DPI, scale: Double = 1.0): List<PxRect> {
+        require(count == 1 || count == 2) { "A page holds one or two cards" }
+        val (pw, ph) = a4Px(dpi)
+        val s = min(scale, idMaxScale(wMm, hMm, count))
+        val w = mmToPx(wMm * s, dpi).roundToInt()
+        val h = mmToPx(hMm * s, dpi).roundToInt()
+        val x = (pw - w) / 2
+        if (count == 1) return listOf(PxRect(x, (ph - h) / 2, w, h))
+        val mid = ph / 2.0
+        val gap = mmToPx(ID_GAP_MM, dpi)
+        return listOf(
+            PxRect(x, (mid - gap).roundToInt() - h, w, h),
+            PxRect(x, (mid + gap).roundToInt(), w, h),
+        )
+    }
+
+    /** The largest [iw] x [ih] shaped rectangle that fits in [slot], centred in it. */
+    fun fitCentered(slot: PxRect, iw: Int, ih: Int): PxRect {
+        val s = min(slot.w.toDouble() / iw, slot.h.toDouble() / ih)
+        val w = (iw * s).roundToInt().coerceIn(1, slot.w)
+        val h = (ih * s).roundToInt().coerceIn(1, slot.h)
+        return PxRect(slot.x + (slot.w - w) / 2, slot.y + (slot.h - h) / 2, w, h)
+    }
+
+    /**
+     * Draws [cards] (one or two, front first) onto a white A4 page at [dpi], each scaled to fit
+     * its [idSlots] slot and centred in it, with rounded corners and no border. The result has
+     * the channel count of the first card. The corner radius follows the card: [cardRadiusMm]
+     * for a card that fills its slot, smaller for one that fills it only one way. [scale] sizes
+     * the cards as in [idSlots].
+     */
+    fun renderIdPage(cards: List<Mat>, wMm: Double, hMm: Double, dpi: Double = ID_DPI, scale: Double = 1.0): Mat {
+        val channels = cards.first().channels()
+        val (pw, ph) = a4Px(dpi)
+        val page = Mat(ph, pw, CvType.CV_8UC(channels), org.opencv.core.Scalar.all(255.0))
+        val slots = idSlots(wMm, hMm, cards.size, dpi, scale)
+        val slotRadius = mmToPx(cardRadiusMm(wMm), dpi) * slots[0].w / mmToPx(wMm, dpi)
+        for ((card, slot) in cards.zip(slots)) {
+            val r = fitCentered(slot, card.cols(), card.rows())
+            val fitted = Mat()
+            Imgproc.resize(card, fitted, Size(r.w.toDouble(), r.h.toDouble()), 0.0, 0.0,
+                if (r.w < card.cols()) Imgproc.INTER_AREA else Imgproc.INTER_CUBIC)
+            val same = when {
+                fitted.channels() == channels -> fitted
+                channels == 1 -> toGray(fitted).also { fitted.release() }
+                else -> fromColor3(toColor3(fitted).also { fitted.release() }, channels)
+            }
+            val radius = slotRadius * min(r.w, r.h) / min(slot.w, slot.h)
+            val mask = roundedMask(r.w, r.h, radius)
+            val masks = Mat()
+            Core.merge(List(channels) { mask }, masks)
+            // White page plus card times mask: card * m / 255 + (255 - m).
+            val ink = Mat()
+            Core.multiply(same, masks, ink, 1.0 / 255)
+            Core.bitwise_not(masks, masks)
+            val roi = page.submat(r.y, r.y + r.h, r.x, r.x + r.w)
+            Core.add(ink, masks, roi)
+            roi.release(); ink.release(); masks.release(); mask.release(); same.release()
+        }
+        return page
+    }
+
+    /** A [w] x [h] 8-bit mask, 255 inside a rectangle with corners rounded at [radius] px, anti-aliased. */
+    private fun roundedMask(w: Int, h: Int, radius: Double): Mat {
+        val m = Mat.zeros(h, w, CvType.CV_8UC1)
+        val r = radius.coerceIn(0.0, min(w, h) / 2.0)
+        val ri = r.roundToInt()
+        val fill = org.opencv.core.Scalar(255.0)
+        if (ri < 1) { m.setTo(fill); return m }
+        Imgproc.rectangle(m, Point(ri.toDouble(), 0.0), Point((w - 1 - ri).toDouble(), h - 1.0), fill, -1)
+        Imgproc.rectangle(m, Point(0.0, ri.toDouble()), Point(w - 1.0, (h - 1 - ri).toDouble()), fill, -1)
+        // Circle centres to 1/16 px so the arcs meet the straight edges.
+        val shift = 4
+        val k = (1 shl shift).toDouble()
+        for ((cx, cy) in listOf(r to r, w - r to r, w - r to h - r, r to h - r)) {
+            Imgproc.circle(m, Point((cx - 0.5) * k, (cy - 0.5) * k), (r * k).roundToInt(), fill, -1, Imgproc.LINE_AA, shift)
+        }
+        return m
+    }
+
+    /**
+     * Whether [quad] (TL, TR, BR, BL) looks like a card with sides in the ratio [ratio] (either way
+     * round, within 20%) and an area between [minArea] and [maxArea] px. With [inside] set, the
+     * quad's centre must also lie in that rectangle. Used to reject a detection that found the
+     * table or a picture on the card instead of the card.
+     */
+    fun isCardQuad(quad: List<Point>, ratio: Double, minArea: Double, maxArea: Double, inside: PxRect? = null): Boolean {
+        val (tl, tr, br, bl) = quad
+        val across = (dist(tl, tr) + dist(bl, br)) / 2
+        val down = (dist(tl, bl) + dist(tr, br)) / 2
+        if (min(across, down) < 1) return false
+        val r = max(across, down) / min(across, down)
+        val want = max(ratio, 1 / ratio)
+        if (abs(r / want - 1) > 0.2) return false
+        val area = polyArea(quad)
+        if (area < minArea || area > maxArea) return false
+        if (inside != null) {
+            val cx = quad.sumOf { it.x } / 4; val cy = quad.sumOf { it.y } / 4
+            if (cx < inside.x || cy < inside.y || cx > inside.x + inside.w || cy > inside.y + inside.h) return false
+        }
+        return true
+    }
+
+    /** True when [quad] is wider than it is tall, measured along its sides. */
+    fun isLandscape(quad: List<Point>): Boolean {
+        val (tl, tr, br, bl) = quad
+        return dist(tl, tr) + dist(bl, br) >= dist(tl, bl) + dist(tr, br)
+    }
+
+    /**
+     * The camera's card guide for a [wMm] x [hMm] card as (left, top, right, bottom), normalised
+     * to an upright 3:4 frame: the card's shape, 80% of the frame width, centred, and shrunk if
+     * it would be taller than 85% of the frame.
+     */
+    fun idGuide(wMm: Double, hMm: Double): DoubleArray {
+        var gw = 0.8
+        var gh = gw * (hMm / wMm) * 3.0 / 4.0
+        if (gh > 0.85) { gw *= 0.85 / gh; gh = 0.85 }
+        return doubleArrayOf((1 - gw) / 2, (1 - gh) / 2, (1 + gw) / 2, (1 + gh) / 2)
+    }
+
+    /**
+     * Finds a card shaped [ratio] (width over height, either way round) in an upright [photo].
+     * [guide] is the camera's card guide in [photo] pixels: the card is searched for in and around
+     * it, and must be centred in it and fill a fair part of it. Without a guide (a gallery picture)
+     * the whole photo is searched. Returns TL, TR, BR, BL in [photo] pixels, or null.
+     */
+    fun findCard(photo: Mat, guide: PxRect?, ratio: Double): List<Point>? {
+        val pw = photo.cols(); val ph = photo.rows()
+        val region = guide?.let { g ->
+            val mx = g.w / 4; val my = g.h / 4
+            val x0 = (g.x - mx).coerceAtLeast(0); val y0 = (g.y - my).coerceAtLeast(0)
+            val x1 = (g.x + g.w + mx).coerceAtMost(pw); val y1 = (g.y + g.h + my).coerceAtMost(ph)
+            PxRect(x0, y0, x1 - x0, y1 - y0)
+        } ?: PxRect(0, 0, pw, ph)
+        val crop = photo.submat(region.y, region.y + region.h, region.x, region.x + region.w)
+        val raw = detect(crop)
+        val found = raw?.let { refineSides(crop, it) }?.map { Point(it.x + region.x, it.y + region.y) }
+        crop.release()
+        found ?: return null
+        val ok = if (guide != null) {
+            isCardQuad(found, ratio, 0.3 * guide.w * guide.h, region.w.toDouble() * region.h, guide)
+        } else {
+            isCardQuad(found, ratio, 0.15 * pw * ph, Double.MAX_VALUE)
+        }
+        return found.takeIf { ok }
+    }
+
+    /**
+     * Cuts a card out of an upright [photo] with [findCard] and flattens it to [w] x [h] px
+     * ([h] x [w] when the card lies the other way round). When no card is found the result is
+     * the [guide] area scaled to [w] x [h], or without a guide the whole photo scaled to fit
+     * inside [w] x [h]. Also returns whether a card was found.
+     */
+    fun cutCard(photo: Mat, guide: PxRect?, w: Int, h: Int): Pair<Mat, Boolean> {
+        val found = findCard(photo, guide, w.toDouble() / h)
+        if (found != null) {
+            val long = max(w, h); val short = min(w, h)
+            val landscape = isLandscape(found)
+            return warpTo(photo, found, if (landscape) long else short, if (landscape) short else long) to true
+        }
+        val pw = photo.cols(); val ph = photo.rows()
+        val out = Mat()
+        if (guide != null) {
+            val g = photo.submat(guide.y, guide.y + guide.h, guide.x, guide.x + guide.w)
+            Imgproc.resize(g, out, Size(w.toDouble(), h.toDouble()), 0.0, 0.0, Imgproc.INTER_AREA)
+            g.release()
+        } else {
+            val r = fitCentered(PxRect(0, 0, w, h), pw, ph)
+            Imgproc.resize(photo, out, Size(r.w.toDouble(), r.h.toDouble()), 0.0, 0.0,
+                if (r.w < pw) Imgproc.INTER_AREA else Imgproc.INTER_CUBIC)
+        }
+        return out to false
+    }
+
+    /**
+     * Moves each side of [quad] onto the strongest edge near it and puts the corners where the
+     * sides meet. Detection places corners on the outline's polygon, which on a card with
+     * rounded corners sits inside the corner arc; fitting lines to the middle of each side
+     * finds the corner the card would have if it were square, so the warp comes out straight.
+     * Returns [quad] unchanged if a side cannot be fitted.
+     */
+    private fun refineSides(src: Mat, quad: List<Point>): List<Point> {
+        val scale = min(1.0, 1000.0 / max(src.cols(), src.rows()))
+        val small = Mat()
+        if (scale < 1.0) Imgproc.resize(src, small, Size(), scale, scale, Imgproc.INTER_AREA) else src.copyTo(small)
+        val gray = toGray(small)
+        small.release()
+        Imgproc.GaussianBlur(gray, gray, Size(5.0, 5.0), 0.0)
+        val gx = Mat(); val gy = Mat()
+        Imgproc.Sobel(gray, gx, CvType.CV_32F, 1, 0)
+        Imgproc.Sobel(gray, gy, CvType.CV_32F, 0, 1)
+        val w = gray.cols(); val h = gray.rows()
+        gray.release()
+        val ax = FloatArray(w * h); val ay = FloatArray(w * h)
+        gx.get(0, 0, ax); gy.get(0, 0, ay)
+        gx.release(); gy.release()
+        val q = quad.map { Point(it.x * scale, it.y * scale) }
+        val search = max(4.0, 0.02 * max(w, h))
+        val lines = ArrayList<DoubleArray>()
+        for (i in 0 until 4) {
+            val a = q[i]; val b = q[(i + 1) % 4]
+            val len = dist(a, b)
+            if (len < 10) break
+            val ux = (b.x - a.x) / len; val uy = (b.y - a.y) / len
+            val nx = -uy; val ny = ux
+            val pts = ArrayList<Point>()
+            val n = (len / 3).toInt().coerceIn(10, 300)
+            for (k in 0..n) {
+                // The middle of the side only: the ends curve away on a rounded corner.
+                val t = 0.15 + 0.7 * k / n
+                val px = a.x + (b.x - a.x) * t; val py = a.y + (b.y - a.y) * t
+                var best = 0.0; var bx = 0.0; var by = 0.0
+                var d = -search
+                while (d <= search) {
+                    val x = (px + nx * d).roundToInt(); val y = (py + ny * d).roundToInt()
+                    if (x in 0 until w && y in 0 until h) {
+                        // Only the gradient across the side counts, so lines inside the card do not pull it.
+                        val g = abs(ax[y * w + x] * nx + ay[y * w + x] * ny)
+                        if (g > best) { best = g; bx = x.toDouble(); by = y.toDouble() }
+                    }
+                    d += 1.0
+                }
+                if (best > 40) pts += Point(bx, by)
+            }
+            if (pts.size < n / 2) break
+            val line = Mat()
+            val mp = MatOfPoint2f(*pts.toTypedArray())
+            Imgproc.fitLine(mp, line, Imgproc.DIST_HUBER, 0.0, 0.01, 0.01)
+            lines += DoubleArray(4) { line.get(it, 0)[0] }
+            line.release(); mp.release()
+        }
+        if (lines.size < 4) return quad
+        // Corner i is where side i-1 (into it) meets side i (out of it).
+        val out = (0 until 4).map { i -> intersect(lines[(i + 3) % 4], lines[i]) ?: return quad }
+        // A refined corner that moved far from the detected one means the fit went wrong.
+        val limit = 3 * search
+        if (out.indices.any { dist(out[it], q[it]) > limit }) return quad
+        return out.map { Point(it.x / scale, it.y / scale) }
+    }
+
+    /** Where two lines given as (vx, vy, x0, y0) cross, or null when they are nearly parallel. */
+    private fun intersect(l1: DoubleArray, l2: DoubleArray): Point? {
+        val (vx1, vy1, x1, y1) = l1.toList()
+        val (vx2, vy2, x2, y2) = l2.toList()
+        val den = vx1 * vy2 - vy1 * vx2
+        if (abs(den) < 1e-6) return null
+        val t = ((x2 - x1) * vy2 - (y2 - y1) * vx2) / den
+        return Point(x1 + vx1 * t, y1 + vy1 * t)
+    }
+
     /** Applies [filter]. The result has the same channel count as [src]. */
     fun applyFilter(src: Mat, filter: Filter): Mat {
         val channels = src.channels()

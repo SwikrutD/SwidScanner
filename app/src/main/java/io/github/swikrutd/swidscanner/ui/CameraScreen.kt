@@ -123,18 +123,22 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 import kotlin.math.max
 
-private val Ready = Color(0xFF4CD787)
-private val Searching = Color(0xFFF2A541)
+internal val Ready = Color(0xFF4CD787)
+internal val Searching = Color(0xFFF2A541)
 private val DebugCyan = Color(0xFF3FD0FF)
 private const val TAG = "SwidCam"
 
 @Composable
 fun CameraScreen(
     nav: NavController, existingDocId: String?, retakePageId: String? = null, retakeThenDoc: Boolean = false,
-    assetKind: AssetKind? = null,
+    assetKind: AssetKind? = null, idCard: Boolean = false,
 ) {
     RequireCamera(nav) {
-        if (assetKind != null) AssetShot(nav, assetKind) else CameraContent(nav, existingDocId, retakePageId, retakeThenDoc)
+        when {
+            idCard -> IdScanScreen(nav)
+            assetKind != null -> AssetShot(nav, assetKind)
+            else -> CameraContent(nav, existingDocId, retakePageId, retakeThenDoc)
+        }
     }
 }
 
@@ -172,7 +176,7 @@ private class AutoState {
 }
 
 /** One analysed frame: the steadied quad to show and the raw detection, normalised to the upright frame, plus what the debug overlay needs. */
-private class FrameResult(val quad: List<Offset>?, val raw: List<Offset>?, val w: Float, val h: Float, val source: OutputTransform?)
+internal class FrameResult(val quad: List<Offset>?, val raw: List<Offset>?, val w: Float, val h: Float, val source: OutputTransform?)
 
 /**
  * With [retakePageId] set, the next shot replaces that page's photo and the crop screen
@@ -552,7 +556,7 @@ private fun CameraContent(nav: NavController, existingDocId: String?, retakePage
 }
 
 @Composable
-private fun ModeToggle(on: String, off: String, value: Boolean, onChange: (Boolean) -> Unit) {
+internal fun ModeToggle(on: String, off: String, value: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.12f)).padding(3.dp)) {
         listOf(on to true, off to false).forEach { (label, v) ->
             val selected = value == v
@@ -586,7 +590,7 @@ internal fun Shutter(progress: Float, busy: Boolean, onClick: () -> Unit) {
  * Runs live page detection on a preview frame and steadies the result with [tracker].
  * Quads are normalised to the upright frame.
  */
-private fun analyzeFrame(image: ImageProxy, tracker: QuadTracker, dump: FrameDump?): FrameResult {
+internal fun analyzeFrame(image: ImageProxy, tracker: QuadTracker, dump: FrameDump?): FrameResult {
     val rotation = image.imageInfo.rotationDegrees
     val luma = planeMat(image.planes[0], image.width, image.height)
     val up = DocProcessing.rotate(luma, rotation)
