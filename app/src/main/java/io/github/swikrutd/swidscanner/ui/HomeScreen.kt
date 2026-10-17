@@ -66,13 +66,16 @@ import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import io.github.swikrutd.swidscanner.data.Doc
 import io.github.swikrutd.swidscanner.data.DocStore
+import io.github.swikrutd.swidscanner.data.Scanner
+import io.github.swikrutd.swidscanner.data.Settings
+import io.github.swikrutd.swidscanner.imaging.MlKitScan
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(nav: NavController) {
+fun HomeScreen(nav: NavController, mlKit: MlKitScan) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val docs by DocStore.docs.collectAsState()
@@ -126,7 +129,10 @@ fun HomeScreen(nav: NavController) {
                     picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 }) { Icon(Icons.Outlined.PhotoLibrary, "Import from gallery") }
                 ExtendedFloatingActionButton(
-                    onClick = { nav.navigate(Routes.camera()) },
+                    onClick = {
+                        // The Google scanner is for the Scan button only. Book mode, ID card and quick scan stay on our camera.
+                        if (Settings.scanner == Scanner.GOOGLE) mlKit.start() else nav.navigate(Routes.camera())
+                    },
                     icon = { Icon(Icons.Outlined.CameraAlt, null) },
                     text = { Text("Scan") },
                 )

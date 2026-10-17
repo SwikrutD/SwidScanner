@@ -9,7 +9,21 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -24,6 +38,7 @@ import androidx.navigation.navArgument
 import io.github.swikrutd.swidscanner.data.Settings
 import io.github.swikrutd.swidscanner.data.ThemeMode
 import io.github.swikrutd.swidscanner.data.AssetKind
+import io.github.swikrutd.swidscanner.imaging.MlKitScan
 import io.github.swikrutd.swidscanner.ui.CameraScreen
 import io.github.swikrutd.swidscanner.ui.CropScreen
 import io.github.swikrutd.swidscanner.ui.DocScreen
@@ -44,6 +59,9 @@ class MainActivity : ComponentActivity() {
     /** Screen to open on top of the current one, from the Scan shortcut, the quick settings tile or adb. */
     private var route by mutableStateOf<String?>(null)
 
+    /** The optional Google scanner. Registers its result launcher, so it has to exist before the activity starts. */
+    private val mlKit = MlKitScan(this) { r -> runOnUiThread { route = r } }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) route = routeFor(intent)
@@ -62,7 +80,7 @@ class MainActivity : ComponentActivity() {
                 )
                 onDispose {}
             }
-            SwidTheme(dark) { AppNav(route) { route = null } }
+            SwidTheme(dark) { AppNav(route, mlKit) { route = null } }
         }
     }
 
@@ -92,13 +110,17 @@ private val LIGHT_SCRIM = Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
 private val DARK_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
 
 @Composable
-private fun AppNav(route: String?, onRouted: () -> Unit) {
+private fun AppNav(route: String?, mlKit: MlKitScan, onRouted: () -> Unit) {
     val nav = rememberNavController()
+    val snackbar = remember { SnackbarHostState() }
+    val busy by mlKit.busy.collectAsState()
     LaunchedEffect(route) {
         if (route != null) { nav.navigate(route); onRouted() }
     }
+    LaunchedEffect(mlKit) { mlKit.notices.collect { snackbar.showSnackbar(it) } }
+    Box(Modifier.fillMaxSize()) {
     NavHost(navController = nav, startDestination = Routes.HOME) {
-        composable(Routes.HOME) { HomeScreen(nav) }
+        composable(Routes.HOME) { HomeScreen(nav, mlKit) }
         composable(
             "camera?docId={docId}&retake={retake}&thenDoc={thenDoc}&asset={asset}&id={id}",
             arguments = listOf(
@@ -150,6 +172,13 @@ private fun AppNav(route: String?, onRouted: () -> Unit) {
         ) { e ->
             assetKindArg(e.arguments?.getString("kind"))?.let { AssetImportScreen(nav, it, e.arguments?.getBoolean("window") ?: false) }
         }
+    }
+    SnackbarHost(snackbar, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 56.dp))
+    if (busy) {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.3f)).pointerInput(Unit) {}, Alignment.Center) {
+            CircularProgressIndicator()
+        }
+    }
     }
 }
 

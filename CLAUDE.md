@@ -19,6 +19,7 @@ Open-source Android document scanner (CamScanner replacement). Kotlin, Jetpack C
 - `core/DocProcessing.kt`: page detection, perspective warp and filters. Pure OpenCV with no Android imports, so it runs on the desktop JVM.
 - `ui/CameraScreen.kt`: CameraX preview, ImageAnalysis frames into `detectFrame()`, overlay drawing, auto-capture state machine in `onFrame()`.
 - `imaging/Images.kt`: bitmap decode, EXIF, `detectCorners()` on full captures, `renderPage()`.
+- `imaging/MlKitScan.kt`: optional Google ML Kit Document Scanner (Settings > Scanner). Only the home Scan button uses it; book mode, ID card, quick scan and Add pages stay on our camera. Pages go through `DocStore.addPage` like a gallery import.
 - `data/DocStore.kt`: documents as JSON + JPEG per page in filesDir/docs.
 - `tools/detect-harness/`: desktop JVM harness that runs DocProcessing on a folder of images and writes overlays.
   `cd tools\detect-harness; .\get-samples.ps1; ..\..\gradlew.bat -p . run --args="samples out"`

@@ -17,7 +17,7 @@ Model names: Opus 5.5 (`claude-opus-5-5`), Sonnet 5.5 (`claude-sonnet-5-5`), Hai
 | 6 Select and partial share or save | Done (commit 4986666) |
 | 7 ID card scan | Done (commit 878bc37) |
 | 8 Polish and release checks | Done (version 1.2.0, versionCode 3, README updated, debug build clean, no unused imports or TODOs; assembleRelease not run) |
-| 9 Hybrid ML Kit document scanner | Planned, decided 2026-10-17, waiting to start |
+| 9 Hybrid ML Kit document scanner | Done (version 1.3.0, versionCode 4; optional Google scanner, own camera stays the default; tested on the Mi 10T Pro with gallery import, signature, reorder and PDF export; fallback path not exercised on a device) |
 
 Also done: live outline stability work (commit b88c108, see CLAUDE.md). The debug build was installed on the phone on 2026-10-17.
 

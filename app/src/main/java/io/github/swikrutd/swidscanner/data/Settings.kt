@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.asStateFlow
 
 enum class PageSize(val label: String) { FIT("Fit image"), A4("A4"), LETTER("Letter") }
 
+/** Which camera the Scan button opens: our own with OpenCV page detection, or Google's ML Kit Document Scanner. */
+enum class Scanner(val label: String) { OWN("SwidScanner camera"), GOOGLE("Google scanner") }
+
 enum class ThemeMode(val label: String) { SYSTEM("System"), LIGHT("Light"), DARK("Dark") }
 
 enum class Quality(val label: String, val maxSide: Int, val jpeg: Int) {
@@ -35,6 +38,10 @@ object Settings {
         p.edit { putString("theme", v.name) }
         _theme.value = v
     }
+
+    var scanner: Scanner
+        get() = enumOr(p.getString("scanner", null), Scanner.OWN)
+        set(v) = p.edit { putString("scanner", v.name) }
 
     var defaultFilter: Filter
         get() = enumOr(p.getString("filter", null), Filter.MAGIC)

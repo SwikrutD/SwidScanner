@@ -20,8 +20,8 @@ android {
         applicationId = "io.github.swikrutd.swidscanner"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.3.0"
         ndk {
             // Covers practically every phone made in the last decade.
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
@@ -111,6 +111,8 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3")
     // Offline OCR (model bundled in the APK)
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    // Optional Google scanner mode (runs inside Google Play services)
+    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
     // Google Drive authorization
     implementation("com.google.android.gms:play-services-auth:21.3.0")
 }

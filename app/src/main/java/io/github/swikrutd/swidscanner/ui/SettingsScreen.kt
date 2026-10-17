@@ -34,6 +34,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,6 +61,8 @@ import io.github.swikrutd.swidscanner.BuildConfigInfo
 import io.github.swikrutd.swidscanner.core.Filter
 import io.github.swikrutd.swidscanner.data.PageSize
 import io.github.swikrutd.swidscanner.data.Quality
+import io.github.swikrutd.swidscanner.data.Scanner
+import io.github.swikrutd.swidscanner.imaging.MlKitScan
 import io.github.swikrutd.swidscanner.data.Settings
 import io.github.swikrutd.swidscanner.data.ThemeMode
 import io.github.swikrutd.swidscanner.export.Drive
@@ -72,6 +77,9 @@ fun SettingsScreen(nav: NavController) {
     val clipboard = LocalClipboardManager.current
     val drive = rememberDriveAuthorizer()
 
+    val googleOk = remember { MlKitScan.available(ctx) }
+    // A saved Google choice on a phone without Play services counts as the own camera, so the row never shows a disabled pick.
+    var scanner by remember { mutableStateOf(Settings.scanner.takeIf { it != Scanner.GOOGLE || googleOk } ?: Scanner.OWN) }
     var filter by remember { mutableStateOf(Settings.defaultFilter) }
     var auto by remember { mutableStateOf(Settings.autoCapture) }
     var batch by remember { mutableStateOf(Settings.batchMode) }
@@ -104,6 +112,22 @@ fun SettingsScreen(nav: NavController) {
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Section("Scanning")
+            Text("Scanner", style = MaterialTheme.typography.labelLarge)
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                Scanner.entries.forEachIndexed { i, o ->
+                    SegmentedButton(
+                        selected = o == scanner,
+                        onClick = { scanner = o; Settings.scanner = o },
+                        shape = SegmentedButtonDefaults.itemShape(i, Scanner.entries.size),
+                        enabled = o != Scanner.GOOGLE || googleOk,
+                    ) { Text(o.label, maxLines = 1) }
+                }
+            }
+            Text(
+                if (googleOk) "The Google scanner is part of Google Play services. It has its own camera screen. Book mode, ID card and quick scan always use the SwidScanner camera."
+                else "The Google scanner needs Google Play services, which is not available on this phone.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Text("Default filter", style = MaterialTheme.typography.labelLarge)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
                 items(Filter.entries) { f ->

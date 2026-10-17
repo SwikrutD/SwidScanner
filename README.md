@@ -5,6 +5,7 @@ An open-source document scanner for Android. No account, no ads and no cloud pro
 ## Features
 
 - **Live page detection.** The camera outlines the document as you aim.
+- **Two scanners.** The default is the SwidScanner camera with its own page detection. In Settings you can switch the Scan button to the Google scanner, which has its own camera screen and cropping and hands the pages back to the app. It needs Google Play services and is closed source. Book mode, ID card and quick scan always use the SwidScanner camera.
 - **Auto-capture or manual.** In Auto mode the shot is taken once the page has been steady for about a second. The shutter button always works too.
 - **Single or batch.** Single takes you straight to corner adjustment after each shot. Batch keeps scanning page after page (it re-arms when you move or turn the page) and you review everything at the end.
 - **Book mode.** Tap the book icon in the camera, line the spine up with the guide and each photo becomes two pages, left and right.
@@ -25,7 +26,7 @@ An open-source document scanner for Android. No account, no ads and no cloud pro
 
 ## Install
 
-Copy `SwidScanner-1.2.0.apk` to the phone and open it. Android will ask you to allow installs from that source the first time. Requires Android 8.0 or later.
+Copy `SwidScanner-1.3.0.apk` to the phone and open it. Android will ask you to allow installs from that source the first time. Requires Android 8.0 or later.
 
 ## Build
 
@@ -75,8 +76,9 @@ To let anyone link Drive, click **Publish app** on the same page so the status b
 | UI | Jetpack Compose, Material 3 | Apache 2.0 |
 | Text recognition | Google ML Kit (bundled model) | Google APIs Terms (free, closed source) |
 | Drive sign-in | Google Play services Auth | Google APIs Terms (free, closed source) |
+| Google scanner (optional) | ML Kit Document Scanner, runs in Google Play services | Google APIs Terms (free, closed source) |
 
-All of SwidScanner's own code is MIT licensed. Two dependencies are free but not open source: ML Kit text recognition and Play services sign-in. Tesseract would be the fully open OCR alternative. It can be swapped in later if you want a build that is open source end to end (for example, for F-Droid).
+All of SwidScanner's own code is MIT licensed. Three dependencies are free but not open source: ML Kit text recognition, Play services sign-in and the optional Google scanner. Tesseract would be the fully open OCR alternative. It can be swapped in later if you want a build that is open source end to end (for example, for F-Droid).
 
 Page detection lives in `core/DocProcessing.kt`. It has no Android dependencies, so it can be tested on a desktop JVM. It runs Canny edges and Otsu segmentation on both brightness and a saturation channel, after a morphological close that erases text. It keeps four-sided convex outlines and scores them by area and by how much of their outline sits on real edges. Photos where the page fills the whole frame return no outline and use the full image.
 
@@ -90,5 +92,11 @@ app/src/main/java/io/github/swikrutd/swidscanner/
   export/                 PDF/JPEG/TXT export, OCR, folder saving, Google Drive
   ui/                     Compose screens
 ```
+
+### Privacy
+
+SwidScanner has no account, no ads and no analytics. Scans, filters and text recognition stay on the phone unless you save to Google Drive.
+
+The Google scanner is off by default. When you switch it on, the camera and cropping screens come from Google Play services, not from this app, and Google's terms and privacy policy apply to them. Google Play services may download the scanner's models and screens the first time you use it. SwidScanner copies the finished pages into its own storage and sends them nowhere.
 
 Scans are stored privately in the app's own storage and are removed if the app is uninstalled. Export anything you want to keep.
