@@ -42,6 +42,10 @@ android {
     }
 
     buildTypes {
+        // Installs beside the release build, so testing never means uninstalling it and losing its documents.
+        debug {
+            applicationIdSuffix = ".dev"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true

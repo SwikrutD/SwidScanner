@@ -10,6 +10,7 @@ import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
 import org.opencv.core.CvType
 import kotlin.math.abs
+import kotlin.math.acos
 import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlin.math.max
@@ -59,6 +60,9 @@ object DocProcessing {
     private const val MIN_STEP = 12
     /** Share of points along a side that must step the same way. */
     private const val STEP_SHARE = 0.6
+    /** Live outlines: smallest corner angle, and how much longer one side may be than the side opposite. */
+    private const val MIN_CORNER_DEG = 50.0
+    private const val MAX_SIDE_RATIO = 2.0
 
     /**
      * Finds the document outline. Returns four corners ordered TL, TR, BR, BL in
@@ -264,6 +268,7 @@ object DocProcessing {
         val accepted = ArrayList<Pair<List<Point>, Double>>()
 
         fun score(q: List<Point>, needsStep: Boolean): Double? {
+            if (!plausibleLive(q, w, h)) return null
             val s = edgeSupport(edgeMap, q) ?: return null
             debugCandidate?.invoke(q, s.sides, s.borderSides)
             if (s.borderSides > 0 || s.sides.min() < MIN_SIDE_SUPPORT || s.sides.average() < MIN_SUPPORT) return null
@@ -305,6 +310,28 @@ object DocProcessing {
         best ?: return null
         val inv = if (scale < 1.0) 1.0 / scale else 1.0
         return order(best.map { Point(it.x * inv, it.y * inv) })
+    }
+
+    /**
+     * Shape checks for a live candidate. Every corner must be in view: a side beyond the frame
+     * can't be checked against edges, so without this the page plus a strip of whatever lies
+     * past the frame edge wins on area. A page seen in perspective keeps its corners near
+     * right angles and its opposite sides of similar length; slivers and kites are chance
+     * alignments of text, shadows and table edges.
+     */
+    private fun plausibleLive(q: List<Point>, w: Int, h: Int): Boolean {
+        val m = 0.01 * max(w, h)
+        if (q.any { it.x < -m || it.y < -m || it.x > w - 1 + m || it.y > h - 1 + m }) return false
+        for (i in 0 until 4) {
+            val p = q[(i + 3) % 4]; val c = q[i]; val n = q[(i + 1) % 4]
+            val ax = p.x - c.x; val ay = p.y - c.y; val bx = n.x - c.x; val by = n.y - c.y
+            val la = hypot(ax, ay); val lb = hypot(bx, by)
+            if (la < 1 || lb < 1) return false
+            val deg = Math.toDegrees(acos(((ax * bx + ay * by) / (la * lb)).coerceIn(-1.0, 1.0)))
+            if (deg < MIN_CORNER_DEG || deg > 180 - MIN_CORNER_DEG) return false
+        }
+        val s = DoubleArray(4) { dist(q[it], q[(it + 1) % 4]) }
+        return max(s[0], s[2]) <= MAX_SIDE_RATIO * min(s[0], s[2]) && max(s[1], s[3]) <= MAX_SIDE_RATIO * min(s[1], s[3])
     }
 
     /**

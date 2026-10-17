@@ -21,6 +21,34 @@ fun main(args: Array<String>) {
         })
         return
     }
+    if (args[0] == "quads") {
+        // quads <session dir>: per-frame chroma detection, for picking truth keys from frames whose overlay looks right.
+        val frames = loadFrames(java.io.File(args[1]))
+        withChroma(frames).forEachIndexed { i, q ->
+            println("$i ${q?.joinToString(",", "[", "]") { "[${it.x.toInt()},${it.y.toInt()}]" }}")
+        }
+        return
+    }
+    if (args[0] == "label") {
+        // label <session dir> <step> <out.jpg>: every step-th frame with its chroma detection and index,
+        // tiled 6 across, for checking by eye which detections can serve as truth keys.
+        val frames = loadFrames(java.io.File(args[1]))
+        val step = args[2].toInt()
+        val picked = frames.indices.filter { it % step == 0 }
+        val quads = withChroma(picked.map { frames[it] })
+        val tiles = picked.mapIndexed { k, i ->
+            val img = frames[i].color()!!
+            quads[k]?.let { q -> for (j in 0 until 4) Imgproc.line(img, q[j], q[(j + 1) % 4], Scalar(0.0, 160.0, 255.0), 3) }
+            val t = Mat(); Imgproc.resize(img, t, Size(200.0, 267.0))
+            Imgproc.putText(t, "$i", org.opencv.core.Point(6.0, 24.0), 0, 0.8, Scalar(0.0, 255.0, 255.0), 2)
+            img.release(); t
+        }.toMutableList()
+        while (tiles.size % 6 != 0) tiles += Mat.zeros(267, 200, tiles[0].type())
+        val rows = tiles.chunked(6).map { r -> Mat().also { org.opencv.core.Core.hconcat(r, it) } }
+        val sheet = Mat(); org.opencv.core.Core.vconcat(rows, sheet)
+        Imgcodecs.imwrite(args[3], sheet)
+        return
+    }
     if (args[0] == "ink") {
         // ink <image|synth> <out>: transparent background for a signature or stamp photo (see Ink.kt).
         ink(args[1], java.io.File(args[2]))

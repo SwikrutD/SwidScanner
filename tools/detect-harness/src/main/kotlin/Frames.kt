@@ -27,14 +27,20 @@ fun loadFrames(dir: File): List<Frame> =
     dir.listFiles { f -> f.name.matches(Regex("f\\d{4}\\.json")) }!!.sorted()
         .map { Frame(dir, it.nameWithoutExtension, JSONObject(it.readText())) }
 
-/** Per-frame truth from a single "quad" or from "keys" interpolated linearly (held before the first and after the last key). */
-fun loadTruth(j: JSONObject, n: Int): List<List<Point>> {
-    if (j.has("quad")) return List(n) { parseQuad(j.get("quad"))!! }
-    val keysObj = j.getJSONObject("keys")
+/**
+ * Per-frame truth from a single "quad" or from "keys" interpolated linearly (held before the first and after the last key).
+ * "none" lists inclusive [from, to] frame ranges where no page should be shown (the page is cut off by the frame).
+ */
+fun loadTruth(j: JSONObject, n: Int): List<List<Point>?> {
+    val none = j.optJSONArray("none")?.let { a -> (0 until a.length()).map { a.getJSONArray(it).let { r -> r.getInt(0)..r.getInt(1) } } }.orEmpty()
+    fun blank(i: Int) = none.any { i in it }
+    if (j.has("quad")) return List(n) { if (blank(it)) null else parseQuad(j.get("quad"))!! }
+    val keysObj = j.optJSONObject("keys") ?: return List(n) { null }
     val keys = keysObj.keySet().map { it.toInt() to parseQuad(keysObj.get(it))!! }.sortedBy { it.first }
     return List(n) { i ->
         val after = keys.indexOfFirst { it.first >= i }
         when {
+            blank(i) -> null
             after == 0 -> keys[0].second
             after < 0 -> keys.last().second
             else -> {
@@ -49,21 +55,23 @@ fun loadTruth(j: JSONObject, n: Int): List<List<Point>> {
 /** Mean corner distance between two ordered quads. */
 fun quadDist(a: List<Point>, b: List<Point>) = (0 until 4).sumOf { hypot(a[it].x - b[it].x, a[it].y - b[it].y) } / 4
 
-class Metrics(val frames: Int, val found: Int, val jitter: Double, val jumps: Int, val err: Double?, val hits: Int) {
+class Metrics(val frames: Int, val found: Int, val jitter: Double, val jumps: Int, val err: Double?, val hits: Int, val wrong: Int) {
     override fun toString() = "found %3d/%-3d  jitter %5.2f%%  jumps %3d%s".format(
         found, frames, jitter, jumps,
-        err?.let { "  err %5.2f%%  correct %3d%%".format(it, hits * 100 / frames) } ?: "",
+        err?.let { "  err %5.2f%%  correct %3d%%  wrong %3d".format(it, hits * 100 / frames, wrong) } ?: "",
     )
 }
 
 /**
  * jitter: mean corner movement between consecutive frames that both have a quad, as % of the frame diagonal.
  * jumps: consecutive frames whose quads differ by more than 5% of the diagonal, or that switch between found and not found.
- * err: mean corner distance to the hand-checked truth (truth.json in the session folder), % of diagonal.
- *   truth.json holds either one "quad" for a steady session or "keys" {frame index: quad}, interpolated between keys.
- * correct: share of all frames whose quad is within 3% of the truth (a missed frame counts as wrong).
+ * err: mean corner distance to the hand-checked truth (truth.json in the session folder), % of diagonal,
+ *   over frames where both have a quad. See [loadTruth] for the format.
+ * correct: share of all frames that match the truth: a quad within 3% of it, or no quad where none is expected.
+ * wrong: frames showing an outline more than 6% off the truth, or one where none is expected. These are
+ *   what looks chaotic on the phone; a missed frame only looks like a short dropout.
  */
-fun measure(quads: List<List<Point>?>, diag: Double, truth: List<List<Point>>?): Metrics {
+fun measure(quads: List<List<Point>?>, diag: Double, truth: List<List<Point>?>?): Metrics {
     var moveSum = 0.0; var moves = 0; var jumps = 0
     for (i in 1 until quads.size) {
         val a = quads[i - 1]; val b = quads[i]
@@ -73,9 +81,24 @@ fun measure(quads: List<List<Point>?>, diag: Double, truth: List<List<Point>>?):
             if (d > 5) jumps++
         } else if ((a == null) != (b == null)) jumps++
     }
-    val errs = if (truth == null) emptyList() else quads.indices.mapNotNull { i -> quads[i]?.let { quadDist(it, truth[i]) / diag * 100 } }
+    var hits = 0; var wrong = 0
+    val errs = ArrayList<Double>()
+    if (truth != null) for (i in quads.indices) {
+        val q = quads[i]; val t = truth[i]
+        when {
+            q == null && t == null -> hits++
+            q == null -> {}
+            t == null -> wrong++
+            else -> {
+                val e = quadDist(q, t) / diag * 100
+                errs += e
+                if (e < 3.0) hits++
+                if (e > 6.0) wrong++
+            }
+        }
+    }
     return Metrics(quads.size, quads.count { it != null }, if (moves > 0) moveSum / moves else 0.0, jumps,
-        if (truth == null) null else if (errs.isEmpty()) Double.NaN else errs.average(), errs.count { it < 3.0 })
+        if (truth == null) null else if (errs.isEmpty()) Double.NaN else errs.average(), hits, wrong)
 }
 
 /** Replays every session under [root] (or [root] itself) through each detector and prints metrics. */
@@ -102,14 +125,14 @@ fun replay(root: File, outDir: File?, detectors: (List<Frame>) -> Map<String, Li
 private val colors = listOf(Scalar(0.0, 220.0, 0.0), Scalar(255.0, 160.0, 0.0), Scalar(0.0, 160.0, 255.0), Scalar(255.0, 0.0, 255.0))
 
 /** Writes one overlay per frame: each detector in its own colour, truth in white. */
-private fun drawSession(s: File, frames: List<Frame>, results: Map<String, List<List<Point>?>>, truth: List<List<Point>>?, out: File) {
+private fun drawSession(s: File, frames: List<Frame>, results: Map<String, List<List<Point>?>>, truth: List<List<Point>?>?, out: File) {
     out.mkdirs()
     // Contact sheet of 8 evenly spaced frames, for a quick look at the whole session.
     val picks = (0 until 8).map { it * (frames.size - 1) / 7 }.toSet()
     val tiles = ArrayList<Mat>()
     frames.forEachIndexed { i, f ->
         val img = f.color() ?: Mat().also { Imgproc.cvtColor(f.gray(), it, Imgproc.COLOR_GRAY2BGR) }
-        truth?.let { poly(img, it[i], Scalar(255.0, 255.0, 255.0), 1) }
+        truth?.get(i)?.let { poly(img, it, Scalar(255.0, 255.0, 255.0), 1) }
         results.values.forEachIndexed { k, quads -> quads[i]?.let { poly(img, it, colors[k % colors.size], 2) } }
         var y = 18.0
         results.keys.forEachIndexed { k, n -> Imgproc.putText(img, n, Point(8.0, y), 0, 0.5, colors[k % colors.size], 1); y += 18 }

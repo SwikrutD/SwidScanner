@@ -6,10 +6,13 @@ Open-source Android document scanner (CamScanner replacement). Kotlin, Jetpack C
 
 - Debug build: `gradlew.bat assembleDebug`
 - Release build: `gradlew.bat assembleRelease` (signed with swidscanner-release.jks via keystore.properties; never commit either file and never regenerate the key)
+- adb is at `C:\Android\sdk\platform-tools\adb.exe` (not on PATH)
 - Install on the USB-connected phone: `adb install -r app\build\outputs\apk\debug\app-debug.apk`
-  - The debug build has a different signature from the installed release. Uninstall the release first (`adb uninstall io.github.swikrutd.swidscanner`) or Android refuses the install.
-- Logs: `adb logcat --pid=(adb shell pidof io.github.swikrutd.swidscanner)` or filter on the tag you add
-- Pull app files from a debug build: `adb exec-out run-as io.github.swikrutd.swidscanner cat files/<path> > local-file`
+  - Debug builds are `io.github.swikrutd.swidscanner.dev` and install beside the release, so the release and its documents stay untouched.
+  - MIUI asks for approval on the phone for USB installs ("Install via USB" must be on in Developer options).
+- Open the camera directly: `adb shell am start -n io.github.swikrutd.swidscanner.dev/io.github.swikrutd.swidscanner.MainActivity --es route camera`
+- Logs: `adb logcat -s SwidCam` (camera mapping and analysis ms/frame in debug builds)
+- Pull app files from a debug build: `adb exec-out run-as io.github.swikrutd.swidscanner.dev cat files/<path> > local-file`
 
 ## Layout
 
@@ -20,24 +23,19 @@ Open-source Android document scanner (CamScanner replacement). Kotlin, Jetpack C
 - `tools/detect-harness/`: desktop JVM harness that runs DocProcessing on a folder of images and writes overlays.
   `cd tools\detect-harness; .\get-samples.ps1; ..\..\gradlew.bat -p . run --args="samples out"`
 
-## Current bug: live page outline is chaotic on a real phone
+## Live page outline
 
-Reported on a real Android phone in both Auto and Manual mode: the outline jumps around and does not reliably lock onto the page. Still photos were tuned and pass (6/6 detectable test photos), so the problem is specific to the live preview path. Likely causes, most likely first:
+Done so far: debug frame dump (REC chip on the camera screen, `ui/FrameDump.kt`), `core/QuadTracker.kt` (vote over 6 frames, size-weighted smoothing, 300 ms hold), stricter live scoring (direction-aware thin edges, step check, dark share, centre bias, chroma plane from U/V) and shape checks (every corner in view, corner angles 50 to 130 degrees, opposite sides within 2x). The overlay mapping was checked on the Mi 10T Pro: analysis 640x480 and preview 1600x1200 cover the same view, no crop.
 
-1. No temporal stability. `detectFrame()` runs an independent detection on every 640x480 frame and `onFrame()` displays it raw. When two candidates score similarly (page vs table edge vs page plus shadow) the overlay flips between them every frame.
-2. Candidate scoring is too permissive for live frames. Edge support uses a morphological gradient thresholded at 14, which lights up almost everywhere on textured surfaces (wood grain, carpet, sensor noise), so wrong quads still score above the 0.5 support cutoff. Canny is fixed at 20/60, also low for noisy preview frames.
-3. Live detection uses only the luminance plane, so the saturation pass that separated white paper from wood in the still tests never runs live.
-4. Possible overlay mapping error. The overlay assumes the preview is a 4:3 stream shown FIT_CENTER inside a 3:4 box, and that the analysis frame has the same field of view. If the phone gives Preview a non-4:3 stream, or ImageAnalysis has a crop rect, the outline is drawn in the wrong place even when detection is right. Verify this first, it's cheap.
+Pages cut off by the frame are rejected on purpose so the user steps back; the capture is re-detected at full size anyway.
 
-## Plan
+Recorded sessions live in `tools/detect-harness/frames/sNN` (not committed). s15 to s22 are a single sheet: s15 wood handheld, s16 white stove, s17 and s18 fabric, s19 strong angle on granite, s20 bank card (under 10% of the frame, so not found), s21 phone too close (page cut off), s22 held in hand with clutter. `truth.json` holds hand-checked keys and "none" ranges where no outline should show.
 
-1. Get real data. Add a debug-only "dump frames" toggle that saves ImageAnalysis frames (upright gray plus the detected quad as JSON) to filesDir/frames. Record a few seconds aiming at a page on different surfaces, pull them with adb into tools/detect-harness/frames, and make the harness print per-frame quads plus a jitter metric (mean corner movement between consecutive frames).
-2. Check the overlay mapping on the device: draw the analysis frame bounds and log Preview/ImageAnalysis resolutions and crop rects. Fix the mapping before tuning detection.
-3. Stabilise: keep a short history of quads; only switch to a new quad after it persists for about 3 frames; smooth corners with an exponential moving average; hold the last good quad for about 300 ms when detection drops out.
-4. Tighten scoring for live frames: thin Canny edges for support, higher thresholds, penalise quads touching the frame border, mild preference for central quads, and run the saturation channel on the chroma planes when available.
-5. Measure jitter and accuracy on the recorded frames in the harness before and after each change, then confirm on the phone.
+- Replay: `cd tools\detect-harness; ..\..\gradlew.bat -p . run --args="frames frames [out]"`. Look at the `chroma+trk` line, that is what the phone shows. "wrong" counts frames showing an outline more than 6% off.
+- `label <session> <step> <out.jpg>` and `quads <session>` help pick new truth keys.
+- Known weak spots: an open book on a white surface (s06), a page cut off with a dark band at the frame edge (s21), small cards. Smaller minimum areas were tried and let blocks inside a page through.
 
-If classic CV still isn't reliable enough, options are a small document-segmentation model run with TFLite/ONNX (stays offline and open source) or Google's ML Kit Document Scanner API (very reliable but closed source and it replaces our camera UI).
+If classic CV still isn't reliable enough, options are a small document-segmentation model run with TFLite/ONNX (stays offline and open source) or Google's ML Kit Document Scanner API (free and very reliable but closed source, needs Play services and replaces our camera UI).
 
 ## Style
 
