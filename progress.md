@@ -4,6 +4,25 @@ Feed this file to Claude Code one step at a time. Each step lists the model and 
 
 Model names: Opus 5.5 (`claude-opus-5-5`), Sonnet 5.5 (`claude-sonnet-5-5`), Haiku 5.5 (`claude-haiku-5-5`). Switch with `/model` and `/effort`.
 
+## Progress (updated 2026-10-17)
+
+| Step | Status |
+|------|--------|
+| 0 Reverse engineer reference APK | Done (notes kept outside the repo) |
+| 1 Overlay model and render pipeline | Done (commit 1599436) |
+| 2 Signature library | Done (commit 1599436) |
+| 3 Stamp library | Done (commit 1599436) |
+| 4 Place on page | Done (commit 804082d) |
+| 5 Drag to reorder | Done (commit 4f1cc8b) |
+| 6 Select and partial share or save | Done (commit 4986666) |
+| 7 ID card scan | Done (commit 878bc37) |
+| 8 Polish and release checks | Done (version 1.2.0, versionCode 3, README updated, debug build clean, no unused imports or TODOs; assembleRelease not run) |
+| 9 Hybrid ML Kit document scanner | Planned, decided 2026-10-17, waiting to start |
+
+Also done: live outline stability work (commit b88c108, see CLAUDE.md). The debug build was installed on the phone on 2026-10-17.
+
+Decision on scanning: keep the open source OpenCV pipeline as the default and add Google's ML Kit Document Scanner as an optional mode (step 9). The default stays open and works without Play services. The optional mode gives better detection on phones that have them.
+
 ## What the repo looks like today (relevant parts)
 
 - `data/DocStore.kt`: `Page(id, corners, filter, rotation, rev)` and `Doc(id, name, created, updated, pages)`. Files per page in filesDir/docs/<docId>: `-orig.jpg`, `-r<rev>.jpg` (rendered), `-t<rev>.jpg` (thumb). Editing a page calls `updatePage()`, which bumps `rev` and re-renders via `Images.renderPage()`. `movePage(docId, pageId, delta)` already exists (one step at a time, used by `PageScreen`).
@@ -168,6 +187,35 @@ Put the layout maths (slot rectangles in mm to pixels, fit and centre) in a pure
 Read CLAUDE.md and progress.md. Review everything added in Steps 1 to 7: bump versionName to 1.2.0 and versionCode, update README.md features list (plain words, no em dashes), add the new screens to the privacy notes only if data handling changed (it should not), run gradlew.bat assembleDebug, then list any unused imports and TODOs. Do not run assembleRelease and do not touch swidscanner-release.jks or keystore.properties.
 ```
 
+## Step 9: Hybrid scanning with the ML Kit Document Scanner (optional mode)
+
+- Model: **Sonnet 5.5**. Effort: **high** (new dependency and a second capture path, but it reuses the existing page pipeline).
+- Do this after step 7 is committed, and before or after step 8 (if after, bump the version there).
+- Files: `app/build.gradle.kts`, `data/Settings.kt`, `ui/HomeScreen.kt` (entry), a new `imaging/MlKitScan.kt`, `ui/CameraScreen.kt` (only for the fallback), `MainActivity.kt` (activity result launcher), README.md.
+- Design:
+  - The default stays the current CameraX screen with our own detection. Nothing changes for users who do nothing.
+  - A setting "Scanner" with two values: "SwidScanner camera" (default) and "Google scanner (needs Google Play services)". The Google choice is hidden or disabled when Play services are missing (check with `GoogleApiAvailability`).
+  - The Google scanner uses `com.google.android.gms:play-services-mlkit-document-scanner`. It runs its own UI and returns JPEG pages. Use `setGalleryImportAllowed(true)`, `setPageLimit` high (about 50), `setResultFormats(RESULT_FORMAT_JPEG)` and `SCANNER_MODE_FULL`.
+  - Each returned page goes through the normal import path (`DocStore.addPage`) so filters, signatures, stamps, reorder and export all work. Run our own `detectCorners()` on the returned image only to fill the crop corners (they will be near the full frame since Google already cropped), so the crop screen still works.
+  - Fallback: if the Google scanner is unavailable or fails to start, show a short message and open our camera.
+  - Do not remove or weaken `core/DocProcessing.kt`, `QuadTracker` or the harness. ID card and book modes keep using our camera.
+- Privacy: the ML Kit scanner works on device. Check the privacy notes in README.md and the homepage and add one line saying the optional Google scanner is a Google Play services component, only if that is accurate after you read Google's current docs.
+
+Prompt to paste:
+
+```
+Read CLAUDE.md and progress.md (step 9). Add the optional Google ML Kit Document Scanner as a second scanning mode next to our own camera, keeping our OpenCV pipeline as the default.
+
+1. Add the dependency com.google.android.gms:play-services-mlkit-document-scanner to app/build.gradle.kts (use the current stable version) and keep the app building with gradlew.bat assembleDebug.
+2. Add a Scanner setting in data/Settings.kt (values: OWN, GOOGLE; default OWN) and a row for it in the Settings screen. Disable the GOOGLE choice with a short hint when Google Play services is not available.
+3. Create imaging/MlKitScan.kt that builds GmsDocumentScannerOptions (gallery import on, page limit 50, JPEG result, full scanner mode), starts the scan through an ActivityResultLauncher registered in MainActivity, and returns the page URIs.
+4. When the setting is GOOGLE, the Scan button on the home screen launches this scanner instead of our camera. Copy each returned page into the document through the existing DocStore add path, fill the crop corners with detectCorners() on the image (or the full frame if none is found), and open the document like a normal scan. Book mode, ID card and quick-scan shortcuts keep using our camera.
+5. If the scanner cannot start or returns an error, show a short snackbar and fall back to our camera.
+6. Update README.md features list and privacy notes (plain words, no em dashes, no Oxford commas, straight quotes). Do not touch swidscanner-release.jks or keystore.properties and do not run assembleRelease.
+
+Install the debug build on the phone with adb, check with a real page that pages arrive in the document and that signatures, export and reorder still work, then report what you tested. Do not commit.
+```
+
 ## Suggested order and effort summary
 
 | Step | Task | Model | Effort |
@@ -181,6 +229,7 @@ Read CLAUDE.md and progress.md. Review everything added in Steps 1 to 7: bump ve
 | 6 | Select and partial share or save | Sonnet 5.5 | medium |
 | 7 | ID card scan | Opus 5.5 then Sonnet 5.5 | high then medium |
 | 8 | Polish and release prep | Haiku 5.5 or Sonnet 5.5 | low |
+| 9 | Hybrid ML Kit document scanner | Sonnet 5.5 | high |
 
 Steps 5 and 6 do not depend on 1 to 4, so they can run first if you want visible wins early. Steps 2 and 3 can be merged into one session if the first goes smoothly.
 
