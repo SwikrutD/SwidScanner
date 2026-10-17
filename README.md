@@ -12,6 +12,7 @@ An open-source document scanner for Android. No account, no ads and no cloud pro
 - **Named from text.** New documents are named after the heading on their first page (switch off in Settings).
 - **Quick scan.** Long-press the app icon and tap Scan, or add the Scan tile to the quick settings panel, to go straight to the camera.
 - **Gallery import.** Turn existing photos into scanned pages, with the same automatic crop.
+- **PDF import.** Open a PDF from the Home screen or share one to SwidScanner. Each page becomes a normal scanned page, so rotate, reorder, sign, stamp, filters, OCR and export all work on it.
 - **Corner adjustment** with draggable handles and a magnifier, plus Auto (re-detect), Full (no crop) and Retake (replace the photo, keeping the page in place).
 - **Five filters:** Original, Magic (flattens shadows and whitens paper), Enhance, Grayscale and B&W. Set a default and apply one to every page.
 - **Page tools:** rotate, delete, pinch or double-tap to zoom. Press and hold a page in the document grid, then drag it to a new place.

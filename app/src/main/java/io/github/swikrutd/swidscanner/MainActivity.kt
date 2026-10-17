@@ -3,6 +3,8 @@ package io.github.swikrutd.swidscanner
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -39,6 +41,7 @@ import io.github.swikrutd.swidscanner.data.Settings
 import io.github.swikrutd.swidscanner.data.ThemeMode
 import io.github.swikrutd.swidscanner.data.AssetKind
 import io.github.swikrutd.swidscanner.imaging.MlKitScan
+import io.github.swikrutd.swidscanner.imaging.PdfImport
 import io.github.swikrutd.swidscanner.ui.CameraScreen
 import io.github.swikrutd.swidscanner.ui.CropScreen
 import io.github.swikrutd.swidscanner.ui.DocScreen
@@ -64,7 +67,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) route = routeFor(intent)
+        if (savedInstanceState == null) {
+            route = routeFor(intent)
+            importPdf(intent)
+        }
         setContent {
             val mode by Settings.theme.collectAsState()
             val dark = when (mode) {
@@ -87,6 +93,18 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         routeFor(intent)?.let { route = it }
+        importPdf(intent)
+    }
+
+    /** A PDF opened or shared from another app becomes a new document. */
+    private fun importPdf(intent: Intent?) {
+        val uri = when (intent?.action) {
+            Intent.ACTION_VIEW -> intent.data
+            Intent.ACTION_SEND -> if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
+            else -> null
+        } ?: return
+        PdfImport.start(this, uri)
     }
 
     private fun routeFor(intent: Intent?): String? = when {
@@ -113,11 +131,15 @@ private val DARK_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
 private fun AppNav(route: String?, mlKit: MlKitScan, onRouted: () -> Unit) {
     val nav = rememberNavController()
     val snackbar = remember { SnackbarHostState() }
-    val busy by mlKit.busy.collectAsState()
+    val scanBusy by mlKit.busy.collectAsState()
+    val pdfBusy by PdfImport.busy.collectAsState()
+    val busy = scanBusy || pdfBusy
     LaunchedEffect(route) {
         if (route != null) { nav.navigate(route); onRouted() }
     }
     LaunchedEffect(mlKit) { mlKit.notices.collect { snackbar.showSnackbar(it) } }
+    LaunchedEffect(Unit) { PdfImport.notices.collect { snackbar.showSnackbar(it) } }
+    LaunchedEffect(Unit) { PdfImport.opened.collect { nav.navigate(Routes.doc(it)) } }
     Box(Modifier.fillMaxSize()) {
     NavHost(navController = nav, startDestination = Routes.HOME) {
         composable(Routes.HOME) { HomeScreen(nav, mlKit) }

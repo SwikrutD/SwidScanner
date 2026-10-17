@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
@@ -69,6 +70,7 @@ import io.github.swikrutd.swidscanner.data.DocStore
 import io.github.swikrutd.swidscanner.data.Scanner
 import io.github.swikrutd.swidscanner.data.Settings
 import io.github.swikrutd.swidscanner.imaging.MlKitScan
+import io.github.swikrutd.swidscanner.imaging.PdfImport
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
@@ -93,6 +95,10 @@ fun HomeScreen(nav: NavController, mlKit: MlKitScan) {
             importing = false
             if (id != null) nav.navigate(Routes.doc(id))
         }
+    }
+
+    val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) PdfImport.start(ctx, uri)
     }
 
     val shown = if (query.isBlank()) docs else docs.filter { it.name.contains(query.trim(), ignoreCase = true) }
@@ -125,6 +131,9 @@ fun HomeScreen(nav: NavController, mlKit: MlKitScan) {
         floatingActionButton = {
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SmallFloatingActionButton(onClick = { nav.navigate(Routes.ID_CARD) }) { Icon(Icons.Outlined.Badge, "Scan ID card") }
+                SmallFloatingActionButton(onClick = { pdfPicker.launch(arrayOf("application/pdf")) }) {
+                    Icon(Icons.Outlined.PictureAsPdf, "Import PDF")
+                }
                 SmallFloatingActionButton(onClick = {
                     picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 }) { Icon(Icons.Outlined.PhotoLibrary, "Import from gallery") }
@@ -146,7 +155,7 @@ fun HomeScreen(nav: NavController, mlKit: MlKitScan) {
                     Spacer(Modifier.height(12.dp))
                     Text("No scans yet", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "Tap Scan to photograph a document, or import pictures from your gallery.",
+                        "Tap Scan to photograph a document, or import pictures or a PDF.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
