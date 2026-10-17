@@ -6,6 +6,7 @@ Open-source Android document scanner (CamScanner replacement). Kotlin, Jetpack C
 
 - Debug build: `gradlew.bat assembleDebug`
 - Release build: `gradlew.bat assembleRelease` (signed with swidscanner-release.jks via keystore.properties; never commit either file and never regenerate the key)
+- Release APKs live in `releases\SwidScanner-<version>.apk` (git-ignored). After a release build, copy `app\build\outputs\apk\release\app-release.apk` there under that name. Current: 1.3.0 (versionCode 4).
 - adb is at `C:\Android\sdk\platform-tools\adb.exe` (not on PATH)
 - Install on the USB-connected phone: `adb install -r app\build\outputs\apk\debug\app-debug.apk`
   - Debug builds are `io.github.swikrutd.swidscanner.dev` and install beside the release, so the release and its documents stay untouched.

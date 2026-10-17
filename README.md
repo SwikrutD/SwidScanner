@@ -26,7 +26,7 @@ An open-source document scanner for Android. No account, no ads and no cloud pro
 
 ## Install
 
-Copy `SwidScanner-1.3.0.apk` to the phone and open it. Android will ask you to allow installs from that source the first time. Requires Android 8.0 or later.
+Copy `SwidScanner-1.3.0.apk` (kept in the `releases` folder) to the phone and open it. Android will ask you to allow installs from that source the first time. Requires Android 8.0 or later.
 
 ## Build
 
@@ -37,7 +37,7 @@ gradlew.bat assembleRelease      (Windows)
 ./gradlew assembleRelease        (macOS / Linux)
 ```
 
-The APK is written to `app/build/outputs/apk/release/app-release.apk` (the `app/build` folder only exists after a build; `SwidScanner-<version>.apk` in the repo root is a copy of the latest release). Release builds are signed with the key described in `keystore.properties`. Without that file the release build comes out unsigned. `./gradlew assembleDebug` always works and signs with the debug key.
+The APK is written to `app/build/outputs/apk/release/app-release.apk` (the `app/build` folder only exists after a build; `releases/SwidScanner-<version>.apk` is a copy of the latest release and is not committed). Release builds are signed with the key described in `keystore.properties`. Without that file the release build comes out unsigned. `./gradlew assembleDebug` always works and signs with the debug key.
 
 Add `-Pemulator` to include x86_64 libraries for running on an emulator.
 

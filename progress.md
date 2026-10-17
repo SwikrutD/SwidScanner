@@ -17,7 +17,7 @@ Model names: Opus 5.5 (`claude-opus-5-5`), Sonnet 5.5 (`claude-sonnet-5-5`), Hai
 | 6 Select and partial share or save | Done (commit 4986666) |
 | 7 ID card scan | Done (commit 878bc37) |
 | 8 Polish and release checks | Done (version 1.2.0, versionCode 3, README updated, debug build clean, no unused imports or TODOs; assembleRelease not run) |
-| 9 Hybrid ML Kit document scanner | Done (version 1.3.0, versionCode 4; optional Google scanner, own camera stays the default; tested on the Mi 10T Pro with gallery import, signature, reorder and PDF export; fallback path not exercised on a device) |
+| 9 Hybrid ML Kit document scanner | Done (version 1.3.0, versionCode 4, signed APK in releases\SwidScanner-1.3.0.apk; optional Google scanner, own camera stays the default; tested on the Mi 10T Pro with gallery import, signature, reorder and PDF export; fallback path not exercised on a device) |
 
 Also done: live outline stability work (commit b88c108, see CLAUDE.md). The debug build was installed on the phone on 2026-10-17.
 
@@ -237,4 +237,4 @@ Steps 5 and 6 do not depend on 1 to 4, so they can run first if you want visible
 
 - The live outline stability work in CLAUDE.md ("Current bug") is separate. Finish or park it before step 7, since ID card capture depends on good detection.
 - The ID layout in step 7 now follows OKEN Scan. The reference photo you attached earlier was never available to the analysis, so compare it with step 7 before you start that step.
-- `_to_delete/` and `SwidScanner-1.1.0.apk` are untracked in git. Keep them out of commits.
+- `_to_delete/`, `releases/` and `SwidScanner-1.1.0.apk` are untracked or ignored in git. Keep them out of commits.
