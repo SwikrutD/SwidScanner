@@ -27,7 +27,7 @@ An open-source document scanner for Android. No account, no ads and no cloud pro
 
 ## Install
 
-Copy `SwidScanner-1.4.0.apk` (kept in the `releases` folder) to the phone and open it. Android will ask you to allow installs from that source the first time. Requires Android 8.0 or later.
+Copy `SwidScanner-1.5.0.apk` (kept in the `releases` folder) to the phone and open it. Android will ask you to allow installs from that source the first time. Requires Android 8.0 or later.
 
 ## Build
 

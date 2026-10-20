@@ -144,6 +144,11 @@ object Settings {
         get() = p.getBoolean("idAuto", false)
         set(v) = p.edit { putBoolean("idAuto", v) }
 
+    /** Stamp "SwidScanner" on exported pages. Turning it off in the UI needs the unlock code. */
+    var watermark: Boolean
+        get() = p.getBoolean("watermark", true)
+        set(v) = p.edit { putBoolean("watermark", v) }
+
     private inline fun <reified E : Enum<E>> enumOr(name: String?, def: E): E =
         name?.let { n -> enumValues<E>().firstOrNull { it.name == n } } ?: def
 }

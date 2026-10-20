@@ -14,14 +14,14 @@ val keystoreProps = Properties().apply {
 
 android {
     namespace = "io.github.swikrutd.swidscanner"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "io.github.swikrutd.swidscanner"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 5
-        versionName = "1.4.0"
+        targetSdk = 36
+        versionCode = 6
+        versionName = "1.5.0"
         ndk {
             // Covers practically every phone made in the last decade.
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")

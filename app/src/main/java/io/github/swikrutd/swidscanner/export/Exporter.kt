@@ -19,7 +19,9 @@ import io.github.swikrutd.swidscanner.data.Page
 import io.github.swikrutd.swidscanner.data.pageRangeLabel
 import io.github.swikrutd.swidscanner.data.PageSize
 import io.github.swikrutd.swidscanner.data.Quality
+import io.github.swikrutd.swidscanner.data.Settings
 import io.github.swikrutd.swidscanner.imaging.Images
+import io.github.swikrutd.swidscanner.imaging.Watermark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
@@ -61,7 +63,9 @@ object Exporter {
                     val name = if (picked.size == 1) "$base.jpg" else "${base}_%02d.jpg".format(i + 1)
                     val f = File(outDir, name)
                     val bmp = Images.decodeFile(DocStore.procFile(doc.id, p), o.quality.maxSide)
-                    Images.saveJpeg(bmp, f, o.quality.jpeg)
+                    val marked = if (Settings.watermark) Watermark.apply(bmp) else bmp
+                    Images.saveJpeg(marked, f, o.quality.jpeg)
+                    if (marked !== bmp) marked.recycle()
                     bmp.recycle()
                     onProgress((i + 1f) / picked.size)
                     f
@@ -81,7 +85,10 @@ object Exporter {
         PDDocument().use { pdf ->
             pages.forEachIndexed { i, p ->
                 val bmp = Images.decodeFile(DocStore.procFile(doc.id, p), o.quality.maxSide)
-                val bytes = ByteArrayOutputStream().also { bmp.compress(Bitmap.CompressFormat.JPEG, o.quality.jpeg, it) }.toByteArray()
+                // OCR below reads the clean bitmap; only the embedded image carries the mark.
+                val marked = if (Settings.watermark) Watermark.apply(bmp) else bmp
+                val bytes = ByteArrayOutputStream().also { marked.compress(Bitmap.CompressFormat.JPEG, o.quality.jpeg, it) }.toByteArray()
+                if (marked !== bmp) marked.recycle()
                 val img = JPEGFactory.createFromByteArray(pdf, bytes)
                 val iw = bmp.width.toFloat(); val ih = bmp.height.toFloat()
                 val landscape = iw > ih

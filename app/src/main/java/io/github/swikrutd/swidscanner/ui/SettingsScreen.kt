@@ -24,7 +24,12 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.Draw
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import io.github.swikrutd.swidscanner.imaging.Watermark
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -97,6 +102,10 @@ fun SettingsScreen(nav: NavController) {
     var saveDrive by remember { mutableStateOf(Settings.saveToDrive) }
     var autoSave by remember { mutableStateOf(Settings.autoSave) }
     var autoName by remember { mutableStateOf(Settings.autoName) }
+    var watermark by remember { mutableStateOf(Settings.watermark) }
+    var askCode by remember { mutableStateOf(false) }
+    var code by remember { mutableStateOf("") }
+    var codeWrong by remember { mutableStateOf(false) }
     val pickFolder = rememberFolderPicker { folderName = Settings.folderName; saveFolder = true }
 
     Scaffold(
@@ -257,8 +266,37 @@ fun SettingsScreen(nav: NavController) {
                     "Scans and text recognition stay on your phone unless you save to Google Drive.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            HorizontalDivider()
+            Section("Advanced")
+            SwitchRow("Watermark", "Stamps \"SwidScanner\" on PDFs and images you export. Turning it off needs a code", watermark) {
+                if (it) { watermark = true; Settings.watermark = true } else { code = ""; codeWrong = false; askCode = true }
+            }
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    if (askCode) {
+        AlertDialog(
+            onDismissRequest = { askCode = false },
+            title = { Text("Turn off watermark") },
+            text = {
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { code = it; codeWrong = false },
+                    label = { Text("Code") }, singleLine = true, isError = codeWrong,
+                    supportingText = if (codeWrong) ({ Text("Wrong code") }) else null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (Watermark.codeOk(code)) { watermark = false; Settings.watermark = false; askCode = false } else codeWrong = true
+                }) { Text("Turn off") }
+            },
+            dismissButton = { TextButton(onClick = { askCode = false }) { Text("Cancel") } },
+        )
     }
 }
 
