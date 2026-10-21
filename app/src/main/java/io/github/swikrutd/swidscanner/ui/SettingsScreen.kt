@@ -104,6 +104,7 @@ fun SettingsScreen(nav: NavController) {
     var autoName by remember { mutableStateOf(Settings.autoName) }
     var watermark by remember { mutableStateOf(Settings.watermark) }
     var askCode by remember { mutableStateOf(false) }
+    var showLicenses by remember { mutableStateOf(false) }
     var code by remember { mutableStateOf("") }
     var codeWrong by remember { mutableStateOf(false) }
     val pickFolder = rememberFolderPicker { folderName = Settings.folderName; saveFolder = true }
@@ -262,10 +263,11 @@ fun SettingsScreen(nav: NavController) {
             HorizontalDivider()
             Section("About")
             Text(
-                "SwidScanner ${BuildConfigInfo.versionName(ctx)}. Open source under the MIT License. " +
+                "SwidScanner ${BuildConfigInfo.versionName(ctx)}. " +
                     "Scans and text recognition stay on your phone unless you save to Google Drive.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            TextButton(onClick = { showLicenses = true }) { Text("Open source licenses") }
 
             HorizontalDivider()
             Section("Advanced")
@@ -274,6 +276,24 @@ fun SettingsScreen(nav: NavController) {
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    if (showLicenses) {
+        AlertDialog(
+            onDismissRequest = { showLicenses = false },
+            title = { Text("Open source licenses") },
+            text = {
+                Text(
+                    "SwidScanner includes these libraries under the Apache License 2.0:\n\n" +
+                        "OpenCV\nAndroidX, CameraX and Jetpack Compose\nPdfBox-Android\nZXing\n\n" +
+                        "Full license text: https://www.apache.org/licenses/LICENSE-2.0\n\n" +
+                        "Text recognition, Google sign-in and the optional Google scanner come from Google and follow Google's terms.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                )
+            },
+            confirmButton = { TextButton(onClick = { showLicenses = false }) { Text("Close") } },
+        )
     }
 
     if (askCode) {

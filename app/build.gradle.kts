@@ -20,8 +20,8 @@ android {
         applicationId = "io.github.swikrutd.swidscanner"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.5.1"
+        versionCode = 8
+        versionName = "1.5.2"
         ndk {
             // Covers practically every phone made in the last decade.
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")

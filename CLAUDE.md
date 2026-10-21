@@ -1,12 +1,12 @@
 # SwidScanner
 
-Open-source Android document scanner (CamScanner replacement). Kotlin, Jetpack Compose, CameraX, OpenCV 4.12, PdfBox-Android, ZXing, ML Kit text recognition. MIT licensed. See README.md for features and the Google Drive setup.
+Android document scanner (CamScanner replacement). Kotlin, Jetpack Compose, CameraX, OpenCV 4.12, PdfBox-Android, ZXing, ML Kit text recognition. Proprietary, source is private. Privacy policy and terms live in the DocsRepo repo under swidscanner/ (not in this repo). See README.md for features and the Google Drive setup.
 
 ## Build and run (Windows)
 
 - Debug build: `gradlew.bat assembleDebug`
 - Release build: `gradlew.bat assembleRelease` (signed with swidscanner-release.jks via keystore.properties; never commit either file and never regenerate the key)
-- Release APKs live in `releases\SwidScanner-<version>.apk` (git-ignored). After a release build, copy `app\build\outputs\apk\release\app-release.apk` there under that name. Current: 1.5.1 (versionCode 7).
+- Release APKs live in `releases\SwidScanner-<version>.apk` (git-ignored). After a release build, copy `app\build\outputs\apk\release\app-release.apk` there under that name. Current: 1.5.2 (versionCode 8).
 - adb is at `C:\Android\sdk\platform-tools\adb.exe` (not on PATH)
 - Install on the USB-connected phone: `adb install -r app\build\outputs\apk\debug\app-debug.apk`
   - Debug builds are `io.github.swikrutd.swidscanner.dev` and install beside the release, so the release and its documents stay untouched.
@@ -37,7 +37,7 @@ Recorded sessions live in `tools/detect-harness/frames/sNN` (not committed). s15
 - `label <session> <step> <out.jpg>` and `quads <session>` help pick new truth keys.
 - Known weak spots: an open book on a white surface (s06), a page cut off with a dark band at the frame edge (s21), small cards. Smaller minimum areas were tried and let blocks inside a page through.
 
-If classic CV still isn't reliable enough, options are a small document-segmentation model run with TFLite/ONNX (stays offline and open source) or Google's ML Kit Document Scanner API (free and very reliable but closed source, needs Play services and replaces our camera UI).
+If classic CV still isn't reliable enough, options are a small document-segmentation model run with TFLite/ONNX (stays offline) or Google's ML Kit Document Scanner API (free and very reliable but closed source, needs Play services and replaces our camera UI).
 
 ## Style
 

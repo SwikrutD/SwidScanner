@@ -54,9 +54,6 @@ PRIVATE BY DESIGN
 - Scans, text recognition and PDF creation never leave your phone
 - The only network use is the Google Drive upload, and only if you link it
 
-OPEN SOURCE
-SwidScanner is free and open source under the MIT License. Source code and issue tracker: https://github.com/SwikrutD/SwidScanner
-
 Requires Android 8.0 or later.
 
 ## Release notes (first release)
@@ -68,8 +65,8 @@ First release on Google Play. Live page detection, batch and book scanning, ID c
 - Category: Tools (or Productivity)
 - Tags: Document scanner, PDF, OCR
 - Contact email: (use an address you are happy to show publicly)
-- Website: https://github.com/SwikrutD/SwidScanner
-- Privacy policy URL: the published docs/privacy.html page (see the steps in chat)
+- Website: https://swikrut.com/DocsRepo/swidscanner/
+- Privacy policy URL: https://swikrut.com/DocsRepo/swidscanner/privacy.html (source in the DocsRepo repo)
 - Ads: none
 - Target audience: 18 and over (or 13 and over); not designed for children
 - App access: no login needed

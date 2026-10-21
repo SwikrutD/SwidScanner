@@ -1,6 +1,6 @@
 # SwidScanner
 
-An open-source document scanner for Android. No account, no ads and no cloud processing: pages are detected, cropped, cleaned up and read entirely on the phone.
+A document scanner for Android. No account, no ads and no cloud processing: pages are detected, cropped, cleaned up and read entirely on the phone.
 
 ## Features
 
@@ -79,7 +79,7 @@ To let anyone link Drive, click **Publish app** on the same page so the status b
 | Drive sign-in | Google Play services Auth | Google APIs Terms (free, closed source) |
 | Google scanner (optional) | ML Kit Document Scanner, runs in Google Play services | Google APIs Terms (free, closed source) |
 
-All of SwidScanner's own code is MIT licensed. Three dependencies are free but not open source: ML Kit text recognition, Play services sign-in and the optional Google scanner. Tesseract would be the fully open OCR alternative. It can be swapped in later if you want a build that is open source end to end (for example, for F-Droid).
+SwidScanner's own code is proprietary (see LICENSE). The open-source libraries above stay under their own licenses and are credited in Settings > About > Open source licenses. Three dependencies are free but closed source: ML Kit text recognition, Play services sign-in and the optional Google scanner.
 
 Page detection lives in `core/DocProcessing.kt`. It has no Android dependencies, so it can be tested on a desktop JVM. It runs Canny edges and Otsu segmentation on both brightness and a saturation channel, after a morphological close that erases text. It keeps four-sided convex outlines and scores them by area and by how much of their outline sits on real edges. Photos where the page fills the whole frame return no outline and use the full image.
 
