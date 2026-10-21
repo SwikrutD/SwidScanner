@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.Draw
 import androidx.compose.material.icons.outlined.FormatColorReset
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.OpenInFull
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -47,10 +48,12 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
@@ -117,6 +120,7 @@ import io.github.swikrutd.swidscanner.data.Overlay
 import io.github.swikrutd.swidscanner.data.Page
 import io.github.swikrutd.swidscanner.imaging.Images
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -231,6 +235,8 @@ fun PlaceOverlayScreen(nav: NavController, docId: String, pageId: String, assetI
     var menu by remember { mutableStateOf(false) }
     var picking by remember { mutableStateOf(false) }
     var discarding by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(false) }
+    var exporting by remember { mutableStateOf(false) }
     val margin = with(LocalDensity.current) { MARGIN.toPx() }
 
     val selected = overlays.firstOrNull { it.id == selectedId }
@@ -286,7 +292,15 @@ fun PlaceOverlayScreen(nav: NavController, docId: String, pageId: String, assetI
             cx = ((canvasSize.width / 2 - d.left) / d.width).coerceIn(0f, 1f)
             cy = ((canvasSize.height / 2 - d.top) / d.height).coerceIn(0f, 1f)
         }
-        val o = Overlay(DocStore.newId(), a.id, a.kind, cx, cy, a.lastWidth.coerceIn(MIN_WIDTH, MAX_WIDTH))
+        val width = a.lastWidth.coerceIn(MIN_WIDTH, MAX_WIDTH)
+        // Step down past any overlay already sitting there, by this one's height, so a second one does not hide the first.
+        val pageRatio = img?.let { it.height.toFloat() / it.width } ?: 1.4f
+        val step = (width * assetRatio(a.id) / pageRatio + 0.02f).coerceIn(0.05f, 0.4f)
+        repeat(8) {
+            if (overlays.none { abs(it.cx - cx) < step / 2 && abs(it.cy - cy) < step / 2 }) return@repeat
+            cy = if (cy + step <= 0.95f) cy + step else 0.1f
+        }
+        val o = Overlay(DocStore.newId(), a.id, a.kind, cx, cy, width)
         overlays.add(o)
         selectedId = o.id
         touched.add(o.id)
@@ -325,11 +339,30 @@ fun PlaceOverlayScreen(nav: NavController, docId: String, pageId: String, assetI
         DocStore.work.launch { widths.forEach { (id, w) -> AssetStore.setLastWidth(id, w) } }
     }
 
-    fun done() {
+    /** Writes the overlays when they changed. The job ends once the page is rendered again. */
+    fun save(): Job? {
         val list = overlays.toList()
-        if (saved != null && list != saved) DocStore.work.launch { DocStore.setOverlays(docId, pageId, list) }
+        val job = if (saved != null && list != saved) DocStore.work.launch { DocStore.setOverlays(docId, pageId, list) } else null
+        if (job != null) saved = list
         rememberWidths()
+        return job
+    }
+
+    fun done() {
+        save()
         nav.popBackStack()
+    }
+
+    /** Saves, waits for the page to render with its overlays, then opens the export sheet. */
+    fun share() {
+        val job = save()
+        sharing = true
+        scope.launch {
+            job?.join()
+            DocStore.busy.first { pageId !in it }
+            sharing = false
+            exporting = true
+        }
     }
 
     /** Saves this page and adds a copy of the selected overlay, at the same normalised spot, to [targets]. */
@@ -369,8 +402,6 @@ fun PlaceOverlayScreen(nav: NavController, docId: String, pageId: String, assetI
                     }
                 },
                 actions = {
-                    IconButton(onClick = { adding = AssetKind.SIGNATURE }) { Icon(Icons.Outlined.Draw, "Add signature") }
-                    IconButton(onClick = { adding = AssetKind.STAMP }) { Icon(Icons.Outlined.Approval, "Add stamp") }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "More") }
                         val canApply = selected != null && pages.size > 1
@@ -433,14 +464,28 @@ fun PlaceOverlayScreen(nav: NavController, docId: String, pageId: String, assetI
                         }
                     } else {
                         Text(
-                            if (overlays.isEmpty()) "Add a signature or stamp with the buttons at the top."
-                            else "Tap a signature or stamp to change it.",
-                            Modifier.fillMaxWidth().padding(vertical = 12.dp), textAlign = TextAlign.Center,
+                            if (overlays.isEmpty()) "Add a signature or stamp with the buttons below."
+                            else "Tap a signature or stamp to change it. Add as many as you need.",
+                            Modifier.fillMaxWidth().padding(vertical = 8.dp), textAlign = TextAlign.Center,
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        Button(onClick = { done() }, enabled = saved != null) { Text("Done") }
+                    val ready = saved != null && !sharing
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(onClick = { adding = AssetKind.SIGNATURE }, Modifier.weight(1f), enabled = ready) {
+                            Icon(Icons.Outlined.Draw, null, Modifier.size(18.dp)); Text("  Signature", maxLines = 1)
+                        }
+                        FilledTonalButton(onClick = { adding = AssetKind.STAMP }, Modifier.weight(1f), enabled = ready) {
+                            Icon(Icons.Outlined.Approval, null, Modifier.size(18.dp)); Text("  Stamp", maxLines = 1)
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { share() }, Modifier.weight(1f), enabled = ready) {
+                            if (sharing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            else Icon(Icons.Outlined.Share, null, Modifier.size(18.dp))
+                            Text("  Share", maxLines = 1)
+                        }
+                        Button(onClick = { done() }, Modifier.weight(1f), enabled = ready) { Text("Done") }
                     }
                 }
             }
@@ -456,6 +501,7 @@ fun PlaceOverlayScreen(nav: NavController, docId: String, pageId: String, assetI
     if (picking) {
         PagePickerDialog(docId, pages, pageId, onDismiss = { picking = false }) { ids -> picking = false; applyTo(ids) }
     }
+    if (exporting) docs.firstOrNull { it.id == docId }?.let { ExportSheet(it, onDismiss = { exporting = false }) }
     if (discarding) {
         ConfirmDialog("Discard changes?", "Signatures and stamps you changed on this page will go back to how they were.", "Discard",
             onDismiss = { discarding = false }) { discarding = false; nav.popBackStack() }
